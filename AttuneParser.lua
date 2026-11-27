@@ -9,7 +9,7 @@
 local AP = _G.AttuneParser or {}
 _G.AttuneParser = AP
 
-AP.VERSION = "1.2.2"
+AP.VERSION = "1.3.0"
 AP.Data = AP.Data or {}
 
 -- User-confirmed server tier defaults (replaced live when ASMSG_ATTUNE_TIERS arrives)
@@ -403,7 +403,209 @@ do
             valdrisAutoOpen = false,
             valdrisIncludeEquipped = false,
             valdrisIncludeBank = true,
+            uiOnboardingDone = false,
+            showValdrisBar = true,
+            blkHeaderLinks = true,
+            blkTabSummary = true,
+            blkTabBags = true,
+            blkTabSets = true,
+            blkTabServer = true,
+            blkSumCatalog = true,
+            blkSumGiftsDust = true,
+            blkSumParagonAuto = true,
+            blkSumStats = true,
+            blkBagsActions = true,
+            blkSrvAuto = true,
+            blkSrvBanks = true,
+            blkSrvBosses = true,
         }
+
+        AP.UI_BLOCK_DEFS = {
+            {
+                key = "blkHeaderLinks",
+                title = "Быстрые кнопки в шапке окна",
+                desc = "Кнопки «Талориан», «Атлас», «Путеводитель» и «Вехи» в правом верхнем углу окна. Уберите для минималистичной шапки.",
+                default = true,
+            },
+            {
+                key = "blkTabSummary",
+                title = "Вкладка «Обзор и Дары»",
+                desc = "Общий прогресс аккаунта и героя, вехи, множители опыта, запасы пыли, настройки автоматики и суммарные статы персонажа.",
+                default = true,
+            },
+            {
+                key = "blkTabBags",
+                title = "Вкладка «Сумки и Ковка»",
+                desc = "Список непоглощенных и недокованных вещей в сумках, банке, Хранилище, Банке вещей и гильдбанке + черный список.",
+                default = true,
+            },
+            {
+                key = "blkTabSets",
+                title = "Вкладка «Сеты T9 / T10»",
+                desc = "Таблица комплектов T9 и T10 с быстрой проверкой недостающих слотов и статуса поглощения.",
+                default = true,
+            },
+            {
+                key = "blkTabServer",
+                title = "Вкладка «События и Боссы»",
+                desc = "Серверная панель: автопоглощение, автопродажа, автосклад в Банк вещей, расщепление, Ключи M+ и таймеры мировых боссов.",
+                default = true,
+            },
+            {
+                key = "blkSumCatalog",
+                title = "Обзор: Каталог, Вехи и Талориан",
+                desc = "Первая карточка «Обзора»: число освоенных предметов, награды вех, прогресс скана и связь со спутником.",
+                default = true,
+            },
+            {
+                key = "blkSumGiftsDust",
+                title = "Обзор: Бонус дня, Опыт и Пыль",
+                desc = "Вторая карточка «Обзора»: текущий дар дня, формулы опыта поглощения и Paragon, остатки пыли и сундуков.",
+                default = true,
+            },
+            {
+                key = "blkSumParagonAuto",
+                title = "Обзор: Доп. уровень, Спек и Автоматика",
+                desc = "Третья карточка «Обзора»: уровень Paragon, активная специализация, статус автоэкипировки и Ключей M+.",
+                default = true,
+            },
+            {
+                key = "blkSumStats",
+                title = "Обзор: Суммарные статы поглощения",
+                desc = "Четвертая карточка «Обзора»: суммарная таблица характеристик (Сила, СПД, Крит, Скорость и т.д.) от поглощения.",
+                default = true,
+            },
+            {
+                key = "blkBagsActions",
+                title = "Сумки: Нижняя панель действий",
+                desc = "Кнопки внизу вкладки «Сумки и Ковка» для быстрого автопоглощения, автосклада и сдачи ресурсов.",
+                default = true,
+            },
+            {
+                key = "blkSrvAuto",
+                title = "События: Блок Автопоглощения и Автопродажи",
+                desc = "Левая колонка вкладки «События и Боссы»: слоты, качество, черный список, автонадевание и автосклад в Банк вещей.",
+                default = true,
+            },
+            {
+                key = "blkSrvBanks",
+                title = "События: Хранилища, Расщепление и M+",
+                desc = "Верхняя часть правой колонки: статусы банков, расщепления предметов и сундуков Ключей M+.",
+                default = true,
+            },
+            {
+                key = "blkSrvBosses",
+                title = "События: Таймеры мировых боссов",
+                desc = "Нижняя часть правой колонки: список мировых боссов и оставшееся время до их возрождения.",
+                default = true,
+            },
+            {
+                key = "showValdrisBar",
+                title = "Панель прогрессии Вальдриса",
+                desc = "Встроенная верхняя панель в окне улучшения вещей (выбор предмета по иконкам, цель до 90%% и автоулучшение).",
+                default = true,
+            },
+            {
+                key = "showAuctionUI",
+                title = "Помощник ковки на аукционе",
+                desc = "Кнопка и боковое окно на аукционе с подсветкой непоглощенных и выгодных для ковки лотов.",
+                default = true,
+            },
+            {
+                key = "showEJOverlay",
+                title = "Боковая панель в Путеводителе",
+                desc = "Оверлей рядом с Путеводителем по приключениям: сводка инста, вещи в сумках и телепорт Талориана.",
+                default = true,
+            },
+            {
+                key = "showEJBadges",
+                title = "Значки добычи в Путеводителе",
+                desc = "Цветные метки прогресса и процентов ковки прямо на строках предметов у боссов в Путеводителе.",
+                default = true,
+            },
+            {
+                key = "tradeAlert",
+                title = "Оповещение в чате при обмене (Trade)",
+                desc = "Подсказка в чат при получении вещей в обмене с расчетом прибавки статов от поглощения.",
+                default = true,
+            },
+            {
+                key = "showMinimap",
+                title = "Кнопка у миникарты",
+                desc = "Иконка AttuneParser вокруг миникарты (окно всегда можно открыть командой /ap).",
+                default = true,
+            },
+            {
+                key = "showPrimeHub",
+                title = "Значок в общем меню PrimeHub",
+                desc = "Плитка AttuneParser на общей панели аддонов PrimeHub.",
+                default = true,
+            },
+        }
+
+        function AP:IsBlockEnabled(key)
+            return self:GetSetting(key) ~= false
+        end
+
+        function AP:SetBlockEnabled(key, val)
+            return self:SetSetting(key, val and true or false)
+        end
+
+        function AP:ApplyUIBlockPreset(preset)
+            local presets = {
+                full = {},
+                minimal = {
+                    blkHeaderLinks = false,
+                    blkTabSummary = false,
+                    blkTabBags = false,
+                    blkTabSets = false,
+                    blkTabServer = false,
+                    blkSumCatalog = true,
+                    blkSumGiftsDust = true,
+                    blkSumParagonAuto = true,
+                    blkSumStats = true,
+                    blkBagsActions = false,
+                    blkSrvAuto = true,
+                    blkSrvBanks = true,
+                    blkSrvBosses = true,
+                    showValdrisBar = true,
+                    showAuctionUI = true,
+                    showEJOverlay = false,
+                    showEJBadges = true,
+                    tradeAlert = false,
+                    showMinimap = true,
+                    showPrimeHub = true,
+                },
+                farm = {
+                    blkHeaderLinks = true,
+                    blkTabSummary = true,
+                    blkTabBags = true,
+                    blkTabSets = false,
+                    blkTabServer = true,
+                    blkSumCatalog = true,
+                    blkSumGiftsDust = true,
+                    blkSumParagonAuto = false,
+                    blkSumStats = false,
+                    blkBagsActions = true,
+                    blkSrvAuto = true,
+                    blkSrvBanks = false,
+                    blkSrvBosses = true,
+                    showValdrisBar = true,
+                    showAuctionUI = true,
+                    showEJOverlay = true,
+                    showEJBadges = true,
+                    tradeAlert = true,
+                    showMinimap = true,
+                    showPrimeHub = true,
+                },
+            }
+            local map = presets[preset] or {}
+            for _, def in ipairs(AP.UI_BLOCK_DEFS) do
+                local v = map[def.key]
+                if v == nil then v = true end
+                self:SetSetting(def.key, v)
+            end
+        end
 
         function AP:EnsureSettings()
             AttuneParserDB = AttuneParserDB or {}
@@ -4447,9 +4649,14 @@ do
                 AP:ToggleUI("top")
                 return
             end
-        elseif msg == "top" or msg == "summary" or msg == "bags" or msg == "sets" or msg == "settings" then
+        elseif msg == "top" or msg == "summary" or msg == "bags" or msg == "sets" or msg == "settings" or msg == "server" then
             if type(AP.OpenUI) == "function" then
                 AP:OpenUI(msg)
+                return
+            end
+        elseif msg == "blocks" or msg == "setup" or msg == "wizard" or msg == "master" then
+            if type(AP.ShowOnboardingWizard) == "function" then
+                AP:ShowOnboardingWizard(true)
                 return
             end
         elseif msg == "config" or msg == "opt" or msg == "options" then

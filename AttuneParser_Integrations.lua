@@ -5243,6 +5243,77 @@ function AP.BuildServerSyncTab(parent)
     wbListBox:SetSize(348, 188)
     PS.StyleBox(wbListBox, 0.36, false)
 
+    local srvEmptyTxt = box:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    srvEmptyTxt:SetPoint("CENTER", box, "CENTER", 0, 10)
+    srvEmptyTxt:SetText("|cff94a3b8Все блоки вкладки «События и Боссы» скрыты.\nВключить их можно в Настройках или командой /ap blocks.|r")
+    srvEmptyTxt:Hide()
+
+    local rightTopWidgets = { rHdr1, statusTxt, openIbBtn, ibEquipNowBtn, depRbBtn, vaultBtn, dspAlertBtn, ibSplitBtn, wbSyncBtn }
+    function box.RelayoutColumns()
+        local autoOn = (type(AP.IsBlockEnabled) ~= "function") or AP:IsBlockEnabled("blkSrvAuto")
+        local banksOn = (type(AP.IsBlockEnabled) ~= "function") or AP:IsBlockEnabled("blkSrvBanks")
+        local bossOn = (type(AP.IsBlockEnabled) ~= "function") or AP:IsBlockEnabled("blkSrvBosses")
+        local rightHasAny = banksOn or bossOn
+
+        if autoOn then
+            leftCard:Show()
+            leftCard:ClearAllPoints()
+            leftCard:SetPoint("TOPLEFT", box, "TOPLEFT", 0, 0)
+            leftCard:SetSize(rightHasAny and 368 or 744, 428)
+        else
+            leftCard:Hide()
+        end
+
+        if rightHasAny then
+            rightCard:Show()
+            rightCard:ClearAllPoints()
+            if autoOn then
+                rightCard:SetPoint("TOPLEFT", leftCard, "TOPRIGHT", 8, 0)
+                rightCard:SetSize(368, 428)
+            else
+                rightCard:SetPoint("TOPLEFT", box, "TOPLEFT", 0, 0)
+                rightCard:SetSize(744, 428)
+            end
+            for _, w in ipairs(rightTopWidgets) do
+                if banksOn then w:Show() else w:Hide() end
+            end
+            if bossOn then
+                wbHdr:Show()
+                wbListBox:Show()
+                wbHdr:ClearAllPoints()
+                wbListBox:ClearAllPoints()
+                if banksOn then
+                    wbHdr:SetPoint("TOPLEFT", 10, -194)
+                    wbListBox:SetPoint("TOPLEFT", 10, -214)
+                    wbListBox:SetPoint("BOTTOMRIGHT", rightCard, "BOTTOMRIGHT", -10, 10)
+                else
+                    wbHdr:SetPoint("TOPLEFT", 10, -10)
+                    wbListBox:SetPoint("TOPLEFT", 10, -30)
+                    wbListBox:SetPoint("BOTTOMRIGHT", rightCard, "BOTTOMRIGHT", -10, 10)
+                    wbSyncBtn:Show()
+                    wbSyncBtn:ClearAllPoints()
+                    wbSyncBtn:SetPoint("TOPRIGHT", rightCard, "TOPRIGHT", -10, -6)
+                end
+            else
+                wbHdr:Hide()
+                wbListBox:Hide()
+            end
+            if banksOn and not bossOn then
+                statusTxt:SetSize(autoOn and 348 or 724, 240)
+            else
+                statusTxt:SetSize(autoOn and 348 or 724, 102)
+            end
+        else
+            rightCard:Hide()
+        end
+
+        if not autoOn and not rightHasAny then
+            srvEmptyTxt:Show()
+        else
+            srvEmptyTxt:Hide()
+        end
+    end
+
     box.wbRows = {}
     local WB_VIS = 9
     local WB_H = 20
@@ -5276,18 +5347,20 @@ function AP.BuildServerSyncTab(parent)
         r:SetPoint("TOPRIGHT", sf, "TOPRIGHT", -16, -(i - 1) * WB_H)
         r.nm = r:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
         r.nm:SetPoint("LEFT", 4, 0)
-        r.nm:SetSize(244, 14)
-        r.nm:SetJustifyH("LEFT")
-        if r.nm.SetWordWrap then r.nm:SetWordWrap(false) end
         r.cd = r:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
         r.cd:SetPoint("RIGHT", -4, 0)
         r.cd:SetSize(74, 14)
         r.cd:SetJustifyH("RIGHT")
+        r.nm:SetPoint("RIGHT", r.cd, "LEFT", -6, 0)
+        r.nm:SetHeight(14)
+        r.nm:SetJustifyH("LEFT")
+        if r.nm.SetWordWrap then r.nm:SetWordWrap(false) end
         r:Hide()
         box.wbRows[i] = r
     end
 
     function box.RefreshData()
+        if box.RelayoutColumns then box.RelayoutColumns() end
         local as = AP:GetAutoSwapSummary()
         for _, u in ipairs(updaters) do
             u.fn(not u.isSell or as.unlocked)
@@ -6931,7 +7004,7 @@ do
     RefreshValdrisBar = function()
         if not vpBar then return end
         local open = IsValdrisFrameOpen()
-        if not open then
+        if not open or AP:GetSetting("showValdrisBar") == false then
             vpBar:Hide()
             if vpPicker then vpPicker:Hide() end
             return
@@ -8142,6 +8215,11 @@ do
     AP:RegisterCallback("FORGE_UPDATED", RefreshValdrisLive)
     AP:RegisterCallback("ATTUNE_UPDATED", RefreshValdrisLive)
     AP:RegisterCallback("SERVER_SYNC_UPDATED", RefreshValdrisLive)
+    AP:RegisterCallback("SETTINGS_UPDATED", function(_, k)
+        if k == "showValdrisBar" then
+            RefreshValdrisBar()
+        end
+    end)
 
     vpDrv:SetScript("OnUpdate", function(self, elapsed)
         if vp.running and vp.pending and GetTime() >= (vp.scheduledAt or 0) then

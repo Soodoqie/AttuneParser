@@ -580,24 +580,37 @@ local function RefreshHeaderAndFooter()
     local gStr = gift.active and ("|cffa855f7" .. (gift.name or "Дар") .. "|r (" .. (gift.remText or "?") .. ")") or "|cff94a3b8Дар не активен|r"
     mainFrame.subText:SetText(string.format("v%s | База: %d предм. | %s | %s", tostring(AP.VERSION), tonumber(bi.items) or 0, gStr, talStr))
 
-    if ms.claimable and ms.claimable > 0 then
-        mainFrame.claimBtn.label:SetText("Вехи (+" .. ms.claimable .. ")")
-        PS.PaintBtn(mainFrame.claimBtn, "green")
+    local showHeaderLinks = (type(AP.IsBlockEnabled) ~= "function") or AP:IsBlockEnabled("blkHeaderLinks")
+    if showHeaderLinks then
+        if ms.claimable and ms.claimable > 0 then
+            mainFrame.claimBtn.label:SetText("Вехи (+" .. ms.claimable .. ")")
+            PS.PaintBtn(mainFrame.claimBtn, "green")
+        else
+            mainFrame.claimBtn.label:SetText("Вехи")
+            PS.PaintBtn(mainFrame.claimBtn, "dark")
+        end
+        mainFrame.claimBtn:Show()
+        mainFrame.ejBtn:Show()
+        mainFrame.atlasBtn:Show()
+        if talActive or talLoaded then
+            mainFrame.talBtn:Show()
+        else
+            mainFrame.talBtn:Hide()
+        end
+        if rawget(_G, "AttuneAtlas_Toggle") then
+            PS.PaintBtn(mainFrame.atlasBtn, "dark")
+        else
+            PS.PaintBtn(mainFrame.atlasBtn, "gray")
+        end
     else
-        mainFrame.claimBtn.label:SetText("Вехи")
-        PS.PaintBtn(mainFrame.claimBtn, "dark")
-    end
-
-    if talActive or talLoaded then
-        mainFrame.talBtn:Show()
-    else
+        mainFrame.claimBtn:Hide()
+        mainFrame.ejBtn:Hide()
+        mainFrame.atlasBtn:Hide()
         mainFrame.talBtn:Hide()
     end
 
-    if rawget(_G, "AttuneAtlas_Toggle") then
-        PS.PaintBtn(mainFrame.atlasBtn, "dark")
-    else
-        PS.PaintBtn(mainFrame.atlasBtn, "gray")
+    if mainFrame.RelayoutTabs then
+        mainFrame.RelayoutTabs()
     end
 
     for key, btn in pairs(mainFrame.tabBtns) do
@@ -1521,11 +1534,18 @@ local function BuildSummaryTab(parent)
         local hd = c:CreateFontString(nil, "OVERLAY", "GameFontNormal")
         hd:SetPoint("TOPLEFT", c, "TOPLEFT", 10, -8)
         hd:SetText("|cffffd200" .. title .. "|r")
+        local dv = c:CreateTexture(nil, "ARTWORK")
+        dv:SetTexture("Interface\\Buttons\\WHITE8X8")
+        dv:SetVertexColor(1, 1, 1, 0.08)
+        dv:SetHeight(1)
+        dv:SetPoint("TOPLEFT", c, "TOPLEFT", 10, -24)
+        dv:SetPoint("TOPRIGHT", c, "TOPRIGHT", -10, -24)
         c.body = c:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-        c.body:SetPoint("TOPLEFT", c, "TOPLEFT", 10, -28)
-        c.body:SetPoint("BOTTOMRIGHT", c, "BOTTOMRIGHT", -10, 32)
+        c.body:SetPoint("TOPLEFT", c, "TOPLEFT", 10, -30)
+        c.body:SetPoint("BOTTOMRIGHT", c, "BOTTOMRIGHT", -10, 34)
         c.body:SetJustifyH("LEFT")
         c.body:SetJustifyV("TOP")
+        if c.body.SetSpacing then c.body:SetSpacing(3) end
         return c
     end
 
@@ -1533,6 +1553,58 @@ local function BuildSummaryTab(parent)
     local c2 = MakeCard(376, 0, 368, 224, "Бонус дня, Опыт и Пыль")
     local c3 = MakeCard(0, -232, 368, 212, "Уровень, Специализация и Автоматика")
     local c4 = MakeCard(376, -232, 368, 212, "Суммарные статы поглощения")
+    box._c1 = c1
+    box._c3 = c3
+    box._c4 = c4
+
+    local cardDefs = {
+        { key = "blkSumCatalog", card = c1 },
+        { key = "blkSumGiftsDust", card = c2 },
+        { key = "blkSumParagonAuto", card = c3 },
+        { key = "blkSumStats", card = c4 },
+    }
+    local emptyTxt = box:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    emptyTxt:SetPoint("CENTER", box, "CENTER", 0, 10)
+    emptyTxt:SetText("|cff94a3b8Все карточки раздела «Обзор и Дары» скрыты.\nВключите нужные в Настройках или командой /ap blocks.|r")
+    emptyTxt:Hide()
+
+    function box.RelayoutCards()
+        local vis = {}
+        for _, item in ipairs(cardDefs) do
+            local on = (type(AP.IsBlockEnabled) ~= "function") or AP:IsBlockEnabled(item.key)
+            if on then
+                vis[#vis + 1] = item.card
+                item.card:Show()
+            else
+                item.card:Hide()
+            end
+        end
+        if #vis == 0 then
+            emptyTxt:Show()
+            return
+        end
+        emptyTxt:Hide()
+        if #vis == 1 then
+            local c = vis[1]
+            c:ClearAllPoints()
+            c:SetPoint("TOPLEFT", box, "TOPLEFT", 0, 0)
+            c:SetSize(744, 300)
+        elseif #vis == 2 then
+            for idx, c in ipairs(vis) do
+                c:ClearAllPoints()
+                c:SetPoint("TOPLEFT", box, "TOPLEFT", (idx - 1) * 376, 0)
+                c:SetSize(368, 340)
+            end
+        else
+            for idx, c in ipairs(vis) do
+                local col = (idx - 1) % 2
+                local row = math.floor((idx - 1) / 2)
+                c:ClearAllPoints()
+                c:SetPoint("TOPLEFT", box, "TOPLEFT", col * 376, row == 0 and 0 or -232)
+                c:SetSize(368, row == 0 and 224 or 212)
+            end
+        end
+    end
 
     local xpHelpBtn = PS.MakeBtn(c2, 108, 18, "Правила опыта (?)", "dark")
     xpHelpBtn:SetPoint("TOPRIGHT", c2, "TOPRIGHT", -8, -7)
@@ -1638,6 +1710,7 @@ local function BuildSummaryTab(parent)
     autoSwapBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
     function box.RefreshData()
+        if box.RelayoutCards then box.RelayoutCards() end
         local cat = AP:GetAccountCatalogSummary()
         local ms = AP:GetMilestonesSummary()
         local active, done, tot = AP:GetScanProgress()
@@ -2132,6 +2205,17 @@ local function BuildBagsTab(parent)
     end
 
     function box.RefreshData()
+        local actOn = (type(AP.IsBlockEnabled) ~= "function") or AP:IsBlockEnabled("blkBagsActions")
+        listBox:ClearAllPoints()
+        listBox:SetPoint("TOPLEFT", topBar, "BOTTOMLEFT", 0, -6)
+        if actOn then
+            listBox:SetPoint("BOTTOMRIGHT", box, "BOTTOMRIGHT", 0, 74)
+            actBar:Show()
+        else
+            listBox:SetPoint("BOTTOMRIGHT", box, "BOTTOMRIGHT", 0, 18)
+            actBar:Hide()
+        end
+
         for k, b in pairs(wBtns) do
             PS.PaintBtn(b, (box.filterWhere == k) and "gold" or "dark")
         end
@@ -2571,27 +2655,58 @@ local function BuildSettingsTab(parent)
     rightCard:SetSize(368, 428)
     PS.StyleBox(rightCard, 0.50, false)
 
+    local function AddSetDiv(card, y)
+        local d = card:CreateTexture(nil, "ARTWORK")
+        d:SetTexture("Interface\\Buttons\\WHITE8X8")
+        d:SetVertexColor(1, 1, 1, 0.08)
+        d:SetHeight(1)
+        d:SetPoint("TOPLEFT", card, "TOPLEFT", 12, y)
+        d:SetPoint("TOPRIGHT", card, "TOPRIGHT", -12, y)
+        return d
+    end
+
     local lHdr = leftCard:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     lHdr:SetPoint("TOPLEFT", 12, -10)
-    lHdr:SetText("|cffffd200Интерфейс и интеграции|r")
+    lHdr:SetText("|cffffd200Интерфейс и блоки|r")
+
+    box.subTab = "widgets"
+    local tabBlkBtn = PS.MakeBtn(leftCard, 78, 20, "Блоки UI", "dark")
+    tabBlkBtn:SetPoint("TOPRIGHT", leftCard, "TOPRIGHT", -10, -7)
+    local tabWidBtn = PS.MakeBtn(leftCard, 78, 20, "Виджеты", "gold")
+    tabWidBtn:SetPoint("RIGHT", tabBlkBtn, "LEFT", -4, 0)
+
+    AddSetDiv(leftCard, -32)
+
+    local widGroup = CreateFrame("Frame", nil, leftCard)
+    widGroup:SetPoint("TOPLEFT", leftCard, "TOPLEFT", 0, -34)
+    widGroup:SetPoint("BOTTOMRIGHT", leftCard, "BOTTOMRIGHT", 0, 74)
+
+    local blkGroup = CreateFrame("Frame", nil, leftCard)
+    blkGroup:SetPoint("TOPLEFT", leftCard, "TOPLEFT", 0, -34)
+    blkGroup:SetPoint("BOTTOMRIGHT", leftCard, "BOTTOMRIGHT", 0, 74)
+    blkGroup:Hide()
 
     local rHdr = rightCard:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     rHdr:SetPoint("TOPLEFT", 12, -10)
     rHdr:SetText("|cffffd200Расчеты, Скан и Питомец Талориан|r")
+    AddSetDiv(rightCard, -32)
 
     local updaters = {}
-    local function AddToggle(card, yOff, settingKey, label, tip)
+    local function AddToggle(card, xOff, yOff, w, h, settingKey, label, tip)
         local row = CreateFrame("Button", nil, card)
-        row:SetPoint("TOPLEFT", card, "TOPLEFT", 10, yOff)
-        row:SetSize(304, 24)
+        row:SetPoint("TOPLEFT", card, "TOPLEFT", xOff, yOff)
+        row:SetSize(w, h)
         local chk = CreateFrame("Frame", nil, row)
         chk:SetPoint("LEFT", row, "LEFT", 0, 0)
-        chk:SetSize(18, 18)
+        chk:SetSize(16, 16)
         PS.StyleBox(chk, 0.70, false)
-        local mark = chk:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-        mark:SetPoint("CENTER", 0, 1)
+        local mark = chk:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        mark:SetPoint("CENTER", 0, 0)
         local txt = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-        txt:SetPoint("LEFT", chk, "RIGHT", 8, 0)
+        txt:SetPoint("LEFT", chk, "RIGHT", 6, 0)
+        txt:SetPoint("RIGHT", row, "RIGHT", -2, 0)
+        txt:SetJustifyH("LEFT")
+        if txt.SetWordWrap then txt:SetWordWrap(false) end
         txt:SetText(label)
 
         row:SetScript("OnClick", function()
@@ -2602,7 +2717,7 @@ local function BuildSettingsTab(parent)
         if tip then
             row:SetScript("OnEnter", function(self)
                 GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-                GameTooltip:SetText(label)
+                GameTooltip:SetText(label, 1, 0.85, 0.25)
                 GameTooltip:AddLine(tip, 0.9, 0.9, 0.9, true)
                 GameTooltip:Show()
             end)
@@ -2613,31 +2728,36 @@ local function BuildSettingsTab(parent)
             if on then
                 mark:SetText("|cff40ff40V|r")
                 PS.StyleBox(chk, 0.75, true)
+                txt:SetTextColor(0.95, 0.95, 0.95)
             else
                 mark:SetText("")
                 PS.StyleBox(chk, 0.55, false)
+                txt:SetTextColor(0.62, 0.66, 0.72)
             end
         end)
         return row
     end
 
-    AddToggle(leftCard, -36, "showMinimap", "Кнопка у миникарты", "Показывать или скрывать кнопку AttuneParser у миникарты (/ap minimap).")
-    AddToggle(leftCard, -64, "showPrimeHub", "Значок в меню аддонов", "Показывать плитку AttuneParser в общем центре аддонов.")
-    AddToggle(leftCard, -92, "showAuctionUI", "Помощник на аукционе", "Показывать кнопку и панель фильтра поглощения на аукционе.")
-    AddToggle(leftCard, -120, "showEJOverlay", "Панель в Путеводителе", "Боковая панель прогресса подземелья, вещей в сумках и бонусов в Путеводителе.")
-    AddToggle(leftCard, -148, "showEJBadges", "Отметки добычи в Путеводителе", "Показывать значки прогресса и ковки прямо на строках добычи.")
-    AddToggle(leftCard, -176, "tradeAlert", "Сводка в чате при обмене", "Выводить в чат сводку по поглощаемым и недокованным вещам в окне обмена.")
+    AddToggle(widGroup, 10, -4,  344, 22, "showMinimap", "Кнопка у миникарты", "Показывать или скрывать кнопку AttuneParser у миникарты (/ap minimap).")
+    AddToggle(widGroup, 10, -28, 344, 22, "showPrimeHub", "Значок в меню аддонов (PrimeHub)", "Показывать плитку AttuneParser в общем центре аддонов.")
+    AddToggle(widGroup, 10, -52, 344, 22, "showAuctionUI", "Помощник ковки на аукционе", "Показывать кнопку и панель фильтра поглощения на аукционе.")
+    AddToggle(widGroup, 10, -76, 344, 22, "showValdrisBar", "Панель прогрессии Вальдриса", "Верхняя панель в окне улучшения вещей (выбор вещи по иконкам и автоулучшение).")
+    AddToggle(widGroup, 10, -100, 344, 22, "showEJOverlay", "Панель в Путеводителе", "Боковая панель прогресса подземелья, вещей в сумках и бонусов в Путеводителе.")
+    AddToggle(widGroup, 10, -124, 344, 22, "showEJBadges", "Отметки добычи в Путеводителе", "Показывать значки прогресса и ковки прямо на строках добычи.")
+    AddToggle(widGroup, 10, -148, 344, 22, "tradeAlert", "Сводка в чате при обмене", "Выводить в чат сводку по поглощаемым и недокованным вещам в окне обмена.")
 
-    local ejSideBtn = PS.MakeBtn(leftCard, 298, 24, "Сторона оверлея Путеводителя: Справа", "dark")
-    ejSideBtn:SetPoint("TOPLEFT", leftCard, "TOPLEFT", 12, -214)
+    AddSetDiv(widGroup, -176)
+
+    local ejSideBtn = PS.MakeBtn(widGroup, 344, 24, "Сторона оверлея Путеводителя: Справа", "dark")
+    ejSideBtn:SetPoint("TOPLEFT", widGroup, "TOPLEFT", 12, -184)
     ejSideBtn:SetScript("OnClick", function()
         local cur = AP:GetSetting("ejOverlaySide")
         AP:SetSetting("ejOverlaySide", (cur == "LEFT") and "RIGHT" or "LEFT")
         box.RefreshData()
     end)
 
-    local resetMmBtn = PS.MakeBtn(leftCard, 144, 24, "Сброс миникарты", "dark")
-    resetMmBtn:SetPoint("TOPLEFT", leftCard, "TOPLEFT", 12, -248)
+    local resetMmBtn = PS.MakeBtn(widGroup, 169, 24, "Сброс миникарты", "dark")
+    resetMmBtn:SetPoint("TOPLEFT", widGroup, "TOPLEFT", 12, -214)
     resetMmBtn:SetScript("OnClick", function()
         KeepAttuneMinimapInPrimeHub()
         AP:SetSetting("minimapAngle", 225)
@@ -2645,23 +2765,89 @@ local function BuildSettingsTab(parent)
         box.RefreshData()
     end)
 
-    local resetAucBtn = PS.MakeBtn(leftCard, 148, 24, "Сброс кнопки аука", "dark")
+    local resetAucBtn = PS.MakeBtn(widGroup, 169, 24, "Сброс кнопки аука", "dark")
     resetAucBtn:SetPoint("LEFT", resetMmBtn, "RIGHT", 6, 0)
     resetAucBtn:SetScript("OnClick", function()
         AP:ResetAuctionPos()
         DEFAULT_CHAT_FRAME:AddMessage("|cff38bdf8[AttuneParser]|r Позиция кнопки аукциона сброшена.")
     end)
 
-    AddToggle(rightCard, -36, "wedAuto", "Приоритет ковки по средам", "По средам при открытии списка автоматически включать приоритет ковки до 90%.")
-    AddToggle(rightCard, -64, "excludeHeavyQuests", "Исключать тяжелые квест-цепочки", "Скрывать труднодоступные квестовые награды из рекомендаций фарма.")
-    AddToggle(rightCard, -92, "autoWarmStats", "Фоновая загрузка характеристик", "После входа плавно до-загружать характеристики редких предметов без лагов.")
+    AddSetDiv(widGroup, -246)
+    local preLbl = widGroup:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    preLbl:SetPoint("TOPLEFT", 12, -254)
+    preLbl:SetText("|cffb0a080Быстрые наборы блоков:|r")
 
+    local preFullBtn = PS.MakeBtn(widGroup, 110, 22, "Все вкл.", "dark")
+    preFullBtn:SetPoint("TOPLEFT", widGroup, "TOPLEFT", 12, -274)
+    preFullBtn:SetScript("OnClick", function() AP:ApplyUIBlockPreset("full") end)
+
+    local preMinBtn = PS.MakeBtn(widGroup, 112, 22, "Минимум (Топ)", "dark")
+    preMinBtn:SetPoint("LEFT", preFullBtn, "RIGHT", 5, 0)
+    preMinBtn:SetScript("OnClick", function() AP:ApplyUIBlockPreset("minimal") end)
+
+    local preFarmBtn = PS.MakeBtn(widGroup, 112, 22, "Фарм и Ковка", "dark")
+    preFarmBtn:SetPoint("LEFT", preMinBtn, "RIGHT", 5, 0)
+    preFarmBtn:SetScript("OnClick", function() AP:ApplyUIBlockPreset("farm") end)
+
+    -- Sub-tab 2: UI Blocks toggles
+    local defByKey = {}
+    for _, d in ipairs(AP.UI_BLOCK_DEFS or {}) do defByKey[d.key] = d end
+    local uiBlkList = {
+        { "blkHeaderLinks",    "Кнопки в шапке окна (Талориан/Атлас/Гид/Вехи)" },
+        { "blkTabSummary",     "Вкладка: Обзор и Дары" },
+        { "blkTabBags",        "Вкладка: Сумки и Ковка" },
+        { "blkTabSets",        "Вкладка: Сеты T9 / T10" },
+        { "blkTabServer",      "Вкладка: События и Боссы" },
+        { "blkSumCatalog",     "Обзор - Карточка: Каталог и Вехи" },
+        { "blkSumGiftsDust",   "Обзор - Карточка: Бонус дня и Пыль" },
+        { "blkSumParagonAuto", "Обзор - Карточка: Уровень и Спек" },
+        { "blkSumStats",       "Обзор - Карточка: Суммарные статы" },
+        { "blkBagsActions",    "Сумки - Нижняя панель действий" },
+        { "blkSrvAuto",        "События - Блок Автопоглощения/Продажи" },
+        { "blkSrvBanks",       "События - Хранилища и Ключи M+" },
+        { "blkSrvBosses",      "События - Таймеры мировых боссов" },
+    }
+    for idx, bDef in ipairs(uiBlkList) do
+        local d = defByKey[bDef[1]]
+        AddToggle(blkGroup, 10, -2 - (idx - 1) * 23, 346, 21, bDef[1], bDef[2], d and d.desc or bDef[2])
+    end
+
+    AddSetDiv(leftCard, -356)
+    local wizardBtn = PS.MakeBtn(leftCard, 344, 28, "|cffffd200Мастер выбора блоков (первый запуск)|r", "gold")
+    wizardBtn:SetPoint("TOPLEFT", leftCard, "TOPLEFT", 12, -364)
+    wizardBtn:SetScript("OnClick", function()
+        if type(AP.ShowOnboardingWizard) == "function" then
+            AP:ShowOnboardingWizard(true)
+        end
+    end)
+    local wizardHint = leftCard:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    wizardHint:SetPoint("BOTTOMLEFT", 12, 10)
+    wizardHint:SetText("|cff8896a8Также доступно в любое время по команде /ap blocks|r")
+
+    local function UpdateSubTabs()
+        local isW = (box.subTab ~= "blocks")
+        PS.PaintBtn(tabWidBtn, isW and "gold" or "dark")
+        PS.PaintBtn(tabBlkBtn, isW and "dark" or "gold")
+        if isW then
+            widGroup:Show(); blkGroup:Hide()
+        else
+            widGroup:Hide(); blkGroup:Show()
+        end
+    end
+    tabWidBtn:SetScript("OnClick", function() box.subTab = "widgets"; UpdateSubTabs() end)
+    tabBlkBtn:SetScript("OnClick", function() box.subTab = "blocks"; UpdateSubTabs() end)
+
+    AddToggle(rightCard, 10, -40, 344, 22, "wedAuto", "Приоритет ковки по средам", "По средам при открытии списка автоматически включать приоритет ковки до 90%.")
+    AddToggle(rightCard, 10, -68, 344, 22, "excludeHeavyQuests", "Исключать тяжелые квест-цепочки", "Скрывать труднодоступные квестовые награды из рекомендаций фарма.")
+    AddToggle(rightCard, 10, -96, 344, 22, "autoWarmStats", "Фоновая загрузка характеристик", "После входа плавно до-загружать характеристики редких предметов без лагов.")
+
+    AddSetDiv(rightCard, -126)
     local talHdr = rightCard:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    talHdr:SetPoint("TOPLEFT", 12, -138)
+    talHdr:SetPoint("TOPLEFT", 12, -134)
     talHdr:SetText("|cffffd200Взаимодействие с питомцем Талориан|r")
 
-    local talModeBtn = PS.MakeBtn(rightCard, 298, 26, "Режим Талориана: Авто", "dark")
-    talModeBtn:SetPoint("TOPLEFT", rightCard, "TOPLEFT", 12, -162)
+    local talModeBtn = PS.MakeBtn(rightCard, 344, 24, "Режим Талориана: Авто", "dark")
+    talModeBtn:SetPoint("TOPLEFT", rightCard, "TOPLEFT", 12, -156)
     talModeBtn:SetScript("OnClick", function()
         local cur = AP:GetSetting("talorianMode")
         AP:SetSetting("talorianMode", (cur == "off") and "auto" or "off")
@@ -2669,27 +2855,28 @@ local function BuildSettingsTab(parent)
     end)
 
     local talInfo = rightCard:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    talInfo:SetPoint("TOPLEFT", rightCard, "TOPLEFT", 12, -198)
+    talInfo:SetPoint("TOPLEFT", rightCard, "TOPLEFT", 12, -188)
     talInfo:SetPoint("RIGHT", rightCard, "RIGHT", -12, 0)
     talInfo:SetJustifyH("LEFT")
 
-    local testTalBtn = PS.MakeBtn(rightCard, 180, 24, "Открыть окно Талориана", "green")
-    testTalBtn:SetPoint("TOPLEFT", rightCard, "TOPLEFT", 12, -278)
+    local testTalBtn = PS.MakeBtn(rightCard, 188, 24, "Открыть окно Талориана", "green")
+    testTalBtn:SetPoint("TOPLEFT", rightCard, "TOPLEFT", 12, -268)
     testTalBtn:SetScript("OnClick", function() AP:OpenTalorianUI() end)
 
+    AddSetDiv(rightCard, -300)
     local srvHdr = rightCard:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    srvHdr:SetPoint("TOPLEFT", 12, -310)
+    srvHdr:SetPoint("TOPLEFT", 12, -308)
     srvHdr:SetText("|cffffd200Автопоглощение и автопродажа|r")
 
-    local srvAutoBtn = PS.MakeBtn(rightCard, 166, 22, "Автопоглощение: ?", "dark")
-    srvAutoBtn:SetPoint("TOPLEFT", rightCard, "TOPLEFT", 12, -332)
+    local srvAutoBtn = PS.MakeBtn(rightCard, 206, 22, "Автопоглощение: ?", "dark")
+    srvAutoBtn:SetPoint("TOPLEFT", rightCard, "TOPLEFT", 12, -330)
     srvAutoBtn:SetScript("OnClick", function()
         local as = AP:GetAutoSwapSummary()
         AP:SetAutoAbsorb(not (as.on == true))
         AP.After(0.25, function() box.RefreshData() end, "ap_ui_srv_ref")
     end)
 
-    local srvBoeBtn = PS.MakeBtn(rightCard, 126, 22, "BoE: ?", "dark")
+    local srvBoeBtn = PS.MakeBtn(rightCard, 132, 22, "BoE: ?", "dark")
     srvBoeBtn:SetPoint("LEFT", srvAutoBtn, "RIGHT", 6, 0)
     srvBoeBtn:SetScript("OnClick", function()
         local as = AP:GetAutoSwapSummary()
@@ -2697,8 +2884,8 @@ local function BuildSettingsTab(parent)
         AP.After(0.25, function() box.RefreshData() end, "ap_ui_srv_ref")
     end)
 
-    local srvSellBtn = PS.MakeBtn(rightCard, 298, 22, "Автопродажа поглощенных: ?", "dark")
-    srvSellBtn:SetPoint("TOPLEFT", rightCard, "TOPLEFT", 12, -360)
+    local srvSellBtn = PS.MakeBtn(rightCard, 344, 22, "Автопродажа поглощенных: ?", "dark")
+    srvSellBtn:SetPoint("TOPLEFT", rightCard, "TOPLEFT", 12, -358)
     srvSellBtn:SetScript("OnClick", function()
         local as = AP:GetAutoSwapSummary()
         if not as.unlocked then
@@ -2710,6 +2897,7 @@ local function BuildSettingsTab(parent)
     end)
 
     function box.RefreshData()
+        UpdateSubTabs()
         for _, fn in ipairs(updaters) do fn() end
         local side = AP:GetSetting("ejOverlaySide")
         ejSideBtn.label:SetText("Сторона оверлея Путеводителя: " .. (side == "LEFT" and "Слева" or "Справа"))
@@ -2898,12 +3086,13 @@ local function CreateMainWindow()
 
     local tabDefs = {
         { key = "top", label = "Топ инстов", w = 108 },
-        { key = "summary", label = "Обзор и Дары", w = 122 },
-        { key = "bags", label = "Сумки и Ковка", w = 130 },
-        { key = "sets", label = "Сеты T9 / T10", w = 124 },
+        { key = "summary", label = "Обзор и Дары", w = 122, blockKey = "blkTabSummary" },
+        { key = "bags", label = "Сумки и Ковка", w = 130, blockKey = "blkTabBags" },
+        { key = "sets", label = "Сеты T9 / T10", w = 124, blockKey = "blkTabSets" },
         { key = "settings", label = "Настройки", w = 104 },
-        { key = "server", label = "События и Боссы", w = 131 },
+        { key = "server", label = "События и Боссы", w = 131, blockKey = "blkTabServer" },
     }
+    f.tabDefs = tabDefs
     f.tabBtns = {}
     f.tabPanels = {}
     local tx = 18
@@ -2913,6 +3102,34 @@ local function CreateMainWindow()
         tx = tx + td.w + 5
         tb:SetScript("OnClick", function() AP:OpenUI(td.key) end)
         f.tabBtns[td.key] = tb
+    end
+
+    local tabDiv = f:CreateTexture(nil, "ARTWORK")
+    tabDiv:SetTexture("Interface\\Buttons\\WHITE8X8")
+    tabDiv:SetVertexColor(0.95, 0.78, 0.28, 0.22)
+    tabDiv:SetHeight(1)
+    tabDiv:SetPoint("TOPLEFT", f, "TOPLEFT", 18, -87)
+    tabDiv:SetPoint("TOPRIGHT", f, "TOPRIGHT", -18, -87)
+
+    function f.RelayoutTabs()
+        local xPos = 18
+        local activeVis = false
+        for _, td in ipairs(tabDefs) do
+            local btn = f.tabBtns[td.key]
+            local vis = (not td.blockKey) or (type(AP.IsBlockEnabled) ~= "function") or AP:IsBlockEnabled(td.blockKey)
+            if vis then
+                btn:ClearAllPoints()
+                btn:SetPoint("TOPLEFT", f, "TOPLEFT", xPos, -58)
+                btn:Show()
+                xPos = xPos + td.w + 5
+                if f.activeTab == td.key then activeVis = true end
+            else
+                btn:Hide()
+            end
+        end
+        if not activeVis then
+            f.activeTab = "top"
+        end
     end
 
     local content = CreateFrame("Frame", nil, f)
@@ -2951,14 +3168,220 @@ function AP:RefreshUI()
     end
 end
 
+do
+    local onboardingFrame = nil
+
+    function AP:ShowOnboardingWizard(force)
+        if not force and self:GetSetting("uiOnboardingDone") == true then
+            return nil
+        end
+        if onboardingFrame then
+            onboardingFrame:Show()
+            if onboardingFrame.RefreshRows then onboardingFrame:RefreshRows() end
+            RaiseFrameFront(onboardingFrame)
+            return onboardingFrame
+        end
+
+        local wf = CreateFrame("Frame", "AP_OnboardingFrame", UIParent)
+        wf:SetSize(610, 514)
+        wf:SetPoint("CENTER", 20, -10)
+        wf:SetFrameStrata("DIALOG")
+        wf:SetToplevel(true)
+        wf:EnableMouse(true)
+        wf:SetMovable(true)
+        wf:RegisterForDrag("LeftButton")
+        wf:SetScript("OnDragStart", wf.StartMoving)
+        wf:SetScript("OnDragStop", wf.StopMovingOrSizing)
+        wf:SetClampedToScreen(true)
+        PS.ApplyWindow(wf)
+        table.insert(UISpecialFrames, "AP_OnboardingFrame")
+
+        local wTitle = wf:CreateFontString(nil, "OVERLAY", "GameFontHighlightLarge")
+        wTitle:SetPoint("TOPLEFT", 16, -14)
+        wTitle:SetText("|cffffd200Добро пожаловать в AttuneParser v" .. tostring(AP.VERSION) .. "|r")
+
+        local wSub = wf:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        wSub:SetPoint("TOPLEFT", 16, -34)
+        wSub:SetPoint("TOPRIGHT", -46, -34)
+        wSub:SetJustifyH("LEFT")
+        wSub:SetText("|cffc8bea8Выберите нужные вкладки, карточки и панели (обновляется сразу). Вернуться можно в Настройках или /ap blocks.|r")
+
+        local wClose = CreateFrame("Button", nil, wf)
+        wClose:SetPoint("TOPRIGHT", wf, "TOPRIGHT", -12, -12)
+        PS.StyleClose(wClose, 24)
+        wClose:SetScript("OnClick", function()
+            AP:SetSetting("uiOnboardingDone", true)
+            wf:Hide()
+        end)
+
+        local preLbl = wf:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        preLbl:SetPoint("TOPLEFT", 16, -66)
+        preLbl:SetText("|cffffd200Готовые наборы:|r")
+
+        wf.presetFullBtn = PS.MakeBtn(wf, 146, 22, "Все включено (Полный)", "green")
+        wf.presetFullBtn:SetPoint("TOPLEFT", wf, "TOPLEFT", 128, -61)
+        wf.presetFullBtn:SetScript("OnClick", function()
+            AP:ApplyUIBlockPreset("full")
+            wf:RefreshRows()
+        end)
+
+        wf.presetMinBtn = PS.MakeBtn(wf, 152, 22, "Минимум (Только Топ)", "dark")
+        wf.presetMinBtn:SetPoint("TOPLEFT", wf, "TOPLEFT", 280, -61)
+        wf.presetMinBtn:SetScript("OnClick", function()
+            AP:ApplyUIBlockPreset("minimal")
+            wf:RefreshRows()
+        end)
+
+        wf.presetFarmBtn = PS.MakeBtn(wf, 156, 22, "Фарм и Ковка", "dark")
+        wf.presetFarmBtn:SetPoint("TOPLEFT", wf, "TOPLEFT", 438, -61)
+        wf.presetFarmBtn:SetScript("OnClick", function()
+            AP:ApplyUIBlockPreset("farm")
+            wf:RefreshRows()
+        end)
+
+        local listBox = CreateFrame("Frame", nil, wf)
+        listBox:SetPoint("TOPLEFT", 14, -90)
+        listBox:SetPoint("BOTTOMRIGHT", -14, 48)
+        PS.StyleBox(listBox, 0.50, false)
+
+        local VIS = 7
+        local ROW_H = 51
+        local rows = {}
+        local defs = AP.UI_BLOCK_DEFS or {}
+        local sf
+        sf = PS.AttachScroll(listBox, VIS * ROW_H, ROW_H, VIS, function()
+            if wf.RenderRows then wf:RenderRows() end
+        end)
+        sf:SetPoint("TOPLEFT", listBox, "TOPLEFT", 4, -4)
+        sf:SetPoint("BOTTOMRIGHT", listBox, "BOTTOMRIGHT", -4, 4)
+        wf.sf = sf
+
+        for i = 1, VIS do
+            local r = CreateFrame("Button", nil, sf)
+            r:SetHeight(ROW_H - 2)
+            r:SetPoint("TOPLEFT", sf, "TOPLEFT", 0, -(i - 1) * ROW_H)
+            r:SetPoint("TOPRIGHT", sf, "TOPRIGHT", -16, -(i - 1) * ROW_H)
+            PS.StyleScrollRow(r, (i % 2) == 1)
+
+            local chk = CreateFrame("Frame", nil, r)
+            chk:SetSize(18, 18)
+            chk:SetPoint("TOPLEFT", r, "TOPLEFT", 8, -8)
+            PS.StyleBox(chk, 0.72, false)
+            r.chk = chk
+
+            local mk = chk:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+            mk:SetPoint("CENTER", 0, 0)
+            r.mk = mk
+
+            local ttl = r:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+            ttl:SetPoint("TOPLEFT", chk, "TOPRIGHT", 8, 1)
+            ttl:SetPoint("RIGHT", r, "RIGHT", -8, 0)
+            ttl:SetJustifyH("LEFT")
+            r.ttl = ttl
+
+            local dsc = r:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+            dsc:SetPoint("TOPLEFT", ttl, "BOTTOMLEFT", 0, -2)
+            dsc:SetPoint("BOTTOMRIGHT", r, "BOTTOMRIGHT", -8, 4)
+            dsc:SetJustifyH("LEFT")
+            dsc:SetJustifyV("TOP")
+            dsc:SetTextColor(0.68, 0.74, 0.82)
+            r.dsc = dsc
+
+            r:SetScript("OnClick", function(self)
+                if not self._def then return end
+                local cur = AP:GetSetting(self._def.key) == true
+                AP:SetSetting(self._def.key, not cur)
+                wf:RefreshRows()
+            end)
+            rows[i] = r
+        end
+        wf.rows = rows
+
+        function wf:RenderRows()
+            local curDefs = AP.UI_BLOCK_DEFS or {}
+            local off = sf.offset or 0
+            for i = 1, VIS do
+                local r = rows[i]
+                local def = curDefs[off + i]
+                if def then
+                    r._def = def
+                    local on = AP:GetSetting(def.key) == true
+                    r.ttl:SetText(on and ("|cffffd200" .. def.title .. "|r") or ("|cff7c8594" .. def.title .. " (скрыт)|r"))
+                    r.dsc:SetText(def.desc or "")
+                    if on then
+                        r.mk:SetText("|cff40ff40V|r")
+                        PS.StyleBox(r.chk, 0.80, true)
+                    else
+                        r.mk:SetText("")
+                        PS.StyleBox(r.chk, 0.55, false)
+                    end
+                    r:Show()
+                else
+                    r._def = nil
+                    r:Hide()
+                end
+            end
+        end
+
+        function wf:RefreshRows()
+            local curDefs = AP.UI_BLOCK_DEFS or {}
+            sf:SetTotal(#curDefs, true)
+        end
+
+        local footNote = wf:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+        footNote:SetPoint("BOTTOMLEFT", 16, 17)
+        footNote:SetText("Вы всегда можете изменить набор в Настройках.")
+
+        wf.skipBtn = PS.MakeBtn(wf, 170, 26, "Оставить все и закрыть", "dark")
+        wf.skipBtn:SetPoint("BOTTOMRIGHT", wf, "BOTTOMRIGHT", -196, 12)
+        wf.skipBtn:SetScript("OnClick", function()
+            if type(AP.ApplyUIBlockPreset) == "function" then AP:ApplyUIBlockPreset("full") end
+            if type(AP.SetSetting) == "function" then AP:SetSetting("uiOnboardingDone", true) end
+            wf:Hide()
+        end)
+
+        wf.applyBtn = PS.MakeBtn(wf, 176, 26, "|cff40ff40Применить и сохранить|r", "green")
+        wf.applyBtn:SetPoint("BOTTOMRIGHT", wf, "BOTTOMRIGHT", -14, 12)
+        wf.applyBtn:SetScript("OnClick", function()
+            if type(AP.SetSetting) == "function" then AP:SetSetting("uiOnboardingDone", true) end
+            wf:Hide()
+        end)
+
+        wf:RefreshRows()
+        wf:Show()
+        RaiseFrameFront(wf)
+        onboardingFrame = wf
+        return wf
+    end
+
+    AP._RefreshOnboardingWizard = function()
+        if onboardingFrame and onboardingFrame:IsShown() and onboardingFrame.RenderRows then
+            onboardingFrame:RenderRows()
+        end
+    end
+end
+
 function AP:OpenUI(tabKey)
     local f = CreateMainWindow()
     if tabKey and f.tabPanels[tabKey] then
-        f.activeTab = tabKey
+        local tdMatch = nil
+        for _, td in ipairs(f.tabDefs or {}) do
+            if td.key == tabKey then tdMatch = td; break end
+        end
+        local canEnable = (type(self.IsBlockEnabled) ~= "function") or self:IsBlockEnabled(tdMatch and tdMatch.blockKey)
+        if not tdMatch or not tdMatch.blockKey or canEnable then
+            f.activeTab = tabKey
+        else
+            f.activeTab = "top"
+        end
     end
     f:Show()
     RaiseFrameFront(f)
     AP:RefreshUI()
+    if type(AP.UI_BLOCK_DEFS) == "table" and self:GetSetting("uiOnboardingDone") ~= true and not AP._onboardingAutoOpened then
+        AP._onboardingAutoOpened = true
+        AP:ShowOnboardingWizard(false)
+    end
 end
 
 function AP:ToggleUI(tabKey)
@@ -3159,9 +3582,14 @@ do
             elseif a1 == "showPrimeHub" then
                 local ph = rawget(_G, "PrimeHub")
                 if ph and type(ph.Refresh) == "function" then pcall(ph.Refresh, ph) end
+            elseif type(a1) == "string" and (a1:sub(1, 3) == "blk" or a1 == "showValdrisBar" or a1 == "showHeaderLinks") then
+                if mainFrame and mainFrame:IsShown() then AP:RefreshUI() end
+                if AP._RefreshOnboardingWizard then AP._RefreshOnboardingWizard() end
+                return
             end
         end
         UpdateMinimapBadge()
+        if AP._RefreshOnboardingWizard then AP._RefreshOnboardingWizard() end
         if mainFrame and mainFrame:IsShown() then
             AP.After(0.08, function() AP:RefreshUI() end, "ap_ui_debounced_refresh")
         end

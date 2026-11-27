@@ -2678,6 +2678,56 @@ def run_standalone_integrations_tests():
     topSf._bar._scripts.OnMouseUp(topSf._bar, "LeftButton")
     assert(topSf.offset < draggedOff, "Clicking upper scrollbar track must jump offset toward 0! got=" .. tostring(topSf.offset))
     _G.GetCursorPosition = _oGCP
+
+    -- Suite 22 (AttuneParser): Modular UI blocks, dynamic reflow, Valdris bar toggle & first-run wizard
+    local AP = AttuneParser
+    assert(_G.AP_OnboardingFrame and _G.AP_OnboardingFrame:IsShown(),
+        "First-run AP:OpenUI on fresh DB must show AP_OnboardingFrame!")
+    local wfAP = _G.AP_OnboardingFrame
+    assert(wfAP.rows and wfAP.rows[1] and wfAP.rows[1]:IsShown(), "AP Onboarding wizard must populate block rows!")
+    -- Toggle Valdris bar off & Summary cards / Bags action bar / Tabs / Server sections via AP API + Wizard
+    AP:SetSetting("showValdrisBar", false)
+    _G._FireEvent("ADDON_LOADED", "PrimeProgress")
+    if _G.AP_ValdrisAutoBar then
+        assert(not _G.AP_ValdrisAutoBar:IsShown(), "AP_ValdrisAutoBar must stay hidden when showValdrisBar == false!")
+    end
+    AP:SetBlockEnabled("blkTabSets", false)
+    AP:SetBlockEnabled("blkHeaderLinks", false)
+    AP:OpenUI("sets")
+    assert(apFrame.activeTab == "top", "Disabled tab sets must fallback to 'top'! got=" .. tostring(apFrame.activeTab))
+    assert(not apFrame.tabBtns.sets:IsShown(), "Disabled sets tab button must hide!")
+    assert(not apFrame.claimBtn:IsShown() and not apFrame.ejBtn:IsShown(), "Disabled header links must hide cleanly!")
+
+    -- Summary card dynamic reflow: hiding 3 of 4 cards expands the 1 remaining card to full 744 width
+    AP:SetBlockEnabled("blkSumCatalog", true)
+    AP:SetBlockEnabled("blkSumGiftsDust", false)
+    AP:SetBlockEnabled("blkSumParagonAuto", false)
+    AP:SetBlockEnabled("blkSumStats", false)
+    AP:OpenUI("summary")
+    local sumP = apFrame.tabPanels.summary
+    assert(sumP._c1:IsShown() and not sumP._c2:IsShown() and not sumP._c3:IsShown() and not sumP._c4:IsShown(),
+        "Summary tab must hide disabled cards!")
+    assert(sumP._c1:GetWidth() == 744, "Single visible Summary card must stretch to 744px! got=" .. tostring(sumP._c1:GetWidth()))
+
+    -- Presets & completion of onboarding
+    wfAP.presetMinBtn._scripts.OnClick(wfAP.presetMinBtn, "LeftButton")
+    assert(not AP:IsBlockEnabled("blkTabSummary") and not AP:IsBlockEnabled("blkTabBags") and not AP:IsBlockEnabled("blkTabServer"),
+        "Minimal preset must disable optional tabs!")
+    wfAP.applyBtn._scripts.OnClick(wfAP.applyBtn, "LeftButton")
+    assert(not wfAP:IsShown() and AP:GetSetting("uiOnboardingDone") == true,
+        "Apply must close AP_OnboardingFrame and persist uiOnboardingDone!")
+    -- Re-opening main UI no longer auto-opens wizard, while /ap blocks does
+    AP:OpenUI("top")
+    assert(not wfAP:IsShown(), "Wizard must not auto-open once uiOnboardingDone == true!")
+    SlashCmdList["ATTUNEPARSER"]("blocks")
+    assert(wfAP:IsShown(), "/ap blocks must reopen AP_OnboardingFrame on demand!")
+    wfAP.presetFullBtn._scripts.OnClick(wfAP.presetFullBtn, "LeftButton")
+    wfAP.applyBtn._scripts.OnClick(wfAP.applyBtn, "LeftButton")
+    assert(AP:IsBlockEnabled("blkTabSummary") and AP:IsBlockEnabled("blkTabSets") and AP:GetSetting("showValdrisBar") == true,
+        "Full preset must re-enable all UI blocks & Valdris bar!")
+    AP:OpenUI("server")
+    AP:SetBlockEnabled("blkSrvAuto", false)
+    assert(apFrame.tabPanels.server:GetWidth() > 0, "Server panel must stay active when right column enabled!")
     ''')
     run_suite_21de(lua3)
     print("STANDALONE AP INTEGRATIONS: PASSED")
@@ -2982,6 +3032,38 @@ def run_real_full_integrated_tests():
     qncBtn._scripts.OnClick(qncBtn, "LeftButton")
     hudBtn._scripts.OnClick(hudBtn, "LeftButton")
     assert(not TalorianTP_DB.serverCtrl.qncEnabled and not TalorianTP_DB.serverCtrl.hudEnabled)
+
+    -- Suite 22b (TalorianTP): Modular UI blocks, dynamic reflow, cardProgress toggle & first-run wizard
+    assert(_G.TalorianOnboardingFrame and _G.TalorianOnboardingFrame:IsShown(),
+        "First-run TalorianTP:OpenUI on fresh DB must show TalorianOnboardingFrame!")
+    local wfT = _G.TalorianOnboardingFrame
+    assert(wfT.rows and wfT.rows[1] and wfT.rows[1]:IsShown(), "Talorian onboarding wizard must populate rows!")
+    -- Toggle individual blocks & verify layout reflows cleanly
+    TalorianTP:SetBlockEnabled("modeBar", false)
+    TalorianTP:SetBlockEnabled("bottomTools", false)
+    TalorianTP:SetBlockEnabled("tabServer", false)
+    local ui22 = TalorianTP:OpenUI(5)
+    assert(not ui22.modeBar:IsShown(), "modeBar must hide when disabled!")
+    assert(not ui22.statusBar:IsShown(), "statusBar must hide when bottomTools == false!")
+    assert(not ui22.tabs[5]:IsShown(), "Tab 5 button must hide when tabServer == false!")
+    assert(TalorianTP_DB.activeTab == 1, "Hiding Tab 5 while selected must fall back to Tab 1! got=" .. tostring(TalorianTP_DB.activeTab))
+    -- Toggle cardProgress off: hides progress bars & badges on destButtons
+    TalorianTP:SetBlockEnabled("cardProgress", false)
+    ui22:RefreshButtons()
+    assert(ui22.destButtons[1] and not ui22.destButtons[1].progBg:IsShown(), "progBg must hide when cardProgress == false!")
+    assert(ui22.destButtons[1].badge:GetText() == "", "card badge must clear when cardProgress == false!")
+    -- Presets + Apply persists uiOnboardingDone
+    wfT.presetMinBtn._scripts.OnClick(wfT.presetMinBtn, "LeftButton")
+    assert(not TalorianTP:IsBlockEnabled("headerUtils") and not ui22.resetBtn:IsShown(), "Minimal preset must hide headerUtils!")
+    wfT.applyBtn._scripts.OnClick(wfT.applyBtn, "LeftButton")
+    assert(not wfT:IsShown() and TalorianTP_DB.uiOnboardingDone == true, "Apply must close TalorianOnboardingFrame and set uiOnboardingDone!")
+    -- /ttp blocks reopens wizard on demand
+    SlashCmdList["TALORIANTP"]("blocks")
+    assert(wfT:IsShown(), "/ttp blocks must reopen TalorianOnboardingFrame!")
+    wfT.presetFullBtn._scripts.OnClick(wfT.presetFullBtn, "LeftButton")
+    wfT.applyBtn._scripts.OnClick(wfT.applyBtn, "LeftButton")
+    assert(TalorianTP:IsBlockEnabled("modeBar") and TalorianTP:IsBlockEnabled("tabServer") and ui22.tabs[5]:IsShown(),
+        "Full preset must restore all TalorianTP UI blocks!")
 
     return "FULL_INTEGRATED_PASSED"
     ''')
