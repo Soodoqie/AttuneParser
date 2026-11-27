@@ -1498,6 +1498,8 @@ def run_tests():
     local _ipf = CreateFrame("Frame", "ItemProgressFrame")
     _ipf:Show()
     _G._FireEvent("CHAT_MSG_ADDON", "ASMSG_IPROG_HELLO", "2:3:3000:120:1:1:1", "WHISPER", "TestHero")
+    local _ipf4 = _G.ItemProgressFrame or CreateFrame("Frame", "ItemProgressFrame")
+    _ipf4:Show()
     _G._FireEvent("CHAT_MSG_ADDON", "ASMSG_IPROG_OPEN", "1", "WHISPER", "TestHero")
     assert(_G.AP_ValdrisAutoBar and _G.AP_ValdrisAutoBar:IsShown(), "Valdris auto toolbar must attach and show on ItemProgressFrame!")
 
@@ -1606,6 +1608,8 @@ def run_tests():
 
     local _ipf19 = CreateFrame("Frame", "ItemProgressFrame")
     _ipf19:Show()
+    local _ipf4 = _G.ItemProgressFrame or CreateFrame("Frame", "ItemProgressFrame")
+    _ipf4:Show()
     _G._FireEvent("CHAT_MSG_ADDON", "ASMSG_IPROG_OPEN", "1", "WHISPER", "TestHero")
 
     -- Security/taint check: AttuneParser MUST NOT overwrite _G.ContainerFrameItemButton_OnClick!
@@ -1745,6 +1749,8 @@ def run_tests():
     _bag19[0][2] = "item:63024:0:0:0:0:0:0"
     _bag19[0][3] = "item:63025:0:0:0:0:0:0"
     AP.forgeBag[0][2] = 1 -- Epic tier 1!
+    local _ipf4 = _G.ItemProgressFrame or CreateFrame("Frame", "ItemProgressFrame")
+    _ipf4:Show()
     _G._FireEvent("CHAT_MSG_ADDON", "ASMSG_IPROG_OPEN", "1", "WHISPER", "TestHero")
     if _G.AP_ValdrisAutoBar and _G.AP_ValdrisAutoBar.pickBtn and _G.AP_ValdrisAutoBar.pickBtn._scripts and _G.AP_ValdrisAutoBar.pickBtn._scripts.OnClick then
         _G.AP_ValdrisAutoBar.pickBtn._scripts.OnClick(_G.AP_ValdrisAutoBar.pickBtn, "LeftButton")
@@ -2628,6 +2634,50 @@ def run_standalone_integrations_tests():
     AttuneParser:OpenUI("sets")
     AttuneParser:OpenUI("settings")
     AttuneParser:OpenUI("server")
+
+    -- Interactive scrollbar tests (buttons, track click, thumb drag)
+    local apFrame = _G.AttuneParserFrame
+    assert(apFrame and apFrame.tabPanels and apFrame.tabPanels.top and apFrame.tabPanels.top.sf, "Expected top tab scroll frame")
+    local topSf = apFrame.tabPanels.top.sf
+    topSf:SetTotal(40, false)
+    assert(topSf._bar:IsShown() and topSf.offset == 0, "Scroll bar must show when total > visCount")
+    -- Mouse click down+up+click on dn must step ONCE (not double)
+    local prevStep = topSf._dn._step
+    topSf._dn._scripts.OnMouseDown(topSf._dn, "LeftButton")
+    topSf._dn._scripts.OnMouseUp(topSf._dn, "LeftButton")
+    topSf._dn._scripts.OnClick(topSf._dn, "LeftButton")
+    assert(topSf.offset == prevStep, "Down button click must step once! got=" .. tostring(topSf.offset))
+    -- Hold-to-repeat while button is held down
+    topSf._dn._scripts.OnMouseDown(topSf._dn, "LeftButton")
+    _G._TickAll(0.30)
+    _G._TickAll(0.08)
+    topSf._dn._scripts.OnMouseUp(topSf._dn, "LeftButton")
+    topSf._dn._scripts.OnClick(topSf._dn, "LeftButton")
+    assert(topSf.offset > prevStep * 2, "Holding down button must repeat scroll! got=" .. tostring(topSf.offset))
+    -- Programmatic OnClick on up steps back up cleanly
+    local beforeUp = topSf.offset
+    topSf._up._scripts.OnClick(topSf._up, "LeftButton")
+    assert(topSf.offset == beforeUp - prevStep, "Up button OnClick must decrease offset! got=" .. tostring(topSf.offset))
+    -- Dragging thumb with mouse
+    local _oGCP = _G.GetCursorPosition
+    local curY = 300
+    _G.GetCursorPosition = function() return 500, curY end
+    topSf:_ScrollTo(0)
+    topSf._thumb._scripts.OnMouseDown(topSf._thumb, "LeftButton")
+    curY = 120
+    _G._TickAll(0.05)
+    local draggedOff = topSf.offset
+    assert(draggedOff >= 10, "Dragging thumb downward must advance offset! got=" .. tostring(draggedOff))
+    topSf._thumb._scripts.OnMouseUp(topSf._thumb, "LeftButton")
+    curY = 10
+    _G._TickAll(0.05)
+    assert(topSf.offset == draggedOff, "Offset must stay fixed after thumb OnMouseUp! got=" .. tostring(topSf.offset))
+    -- Track click near top jumps toward 0
+    curY = (topSf._bar:GetTop() or 376) - 24
+    topSf._bar._scripts.OnMouseDown(topSf._bar, "LeftButton")
+    topSf._bar._scripts.OnMouseUp(topSf._bar, "LeftButton")
+    assert(topSf.offset < draggedOff, "Clicking upper scrollbar track must jump offset toward 0! got=" .. tostring(topSf.offset))
+    _G.GetCursorPosition = _oGCP
     ''')
     run_suite_21de(lua3)
     print("STANDALONE AP INTEGRATIONS: PASSED")
@@ -2738,6 +2788,101 @@ def run_real_full_integrated_tests():
     local deletedAll = TalorianTP_DeleteAllTalorianMacros()
     _G.InCombatLockdown, _G.GetNumMacros, _G.GetMacroInfo, _G.DeleteMacro = _oICL, _oGNM, _oGMI, _oDM
     assert(deletedAll == 2 and #deletedIds == 2, "DeleteAllTalorianMacros must clean both general and char T_* macros! got=" .. tostring(deletedAll))
+
+    -- Suite 21l: Interactive mouse scrollbars in TalorianTP Explorer, TalorianTopFrame, and AP_ValdrisPickerFrame
+    assert(af.zoneScroll and af.zoneScroll._bar and af.zoneScroll._thumb and af.zoneScroll._up and af.zoneScroll._dn,
+        "Explorer zoneScroll must use PS.AttachScroll interactive controls!")
+    assert(af.itemScroll and af.itemScroll._bar and af.itemScroll._thumb and af.itemScroll._up and af.itemScroll._dn,
+        "Explorer itemScroll must use PS.AttachScroll interactive controls!")
+    assert(af.zoneScroll._bar:IsShown(), "Explorer zoneScroll bar must show when raids > VIS_ZONES!")
+    local zFirst0 = af.zoneRows[1] and af.zoneRows[1].zoneRec and af.zoneRows[1].zoneRec.dest and af.zoneRows[1].zoneRec.dest.name
+    af.zoneScroll._dn._scripts.OnMouseDown(af.zoneScroll._dn, "LeftButton")
+    af.zoneScroll._dn._scripts.OnMouseUp(af.zoneScroll._dn, "LeftButton")
+    af.zoneScroll._dn._scripts.OnClick(af.zoneScroll._dn, "LeftButton")
+    local zOffAfterDn = af.zoneScroll.offset
+    local zFirst1 = af.zoneRows[1] and af.zoneRows[1].zoneRec and af.zoneRows[1].zoneRec.dest and af.zoneRows[1].zoneRec.dest.name
+    assert(zOffAfterDn > 0 and zFirst1 ~= zFirst0, "Explorer zoneScroll down button must shift zone rows! got off=" .. tostring(zOffAfterDn))
+    af.zoneScroll._up._scripts.OnClick(af.zoneScroll._up, "LeftButton")
+    assert(af.zoneScroll.offset == 0, "Explorer zoneScroll up button must return to 0! got=" .. tostring(af.zoneScroll.offset))
+
+    -- Dragging itemScroll thumb in Explorer
+    assert(af.itemScroll._bar:IsShown() and (af.itemScroll.total or 0) > 10, "ICC 'all' status must fill > 10 items for scrollbar test!")
+    local iFirst0 = af.itemRows[1] and af.itemRows[1].itemData and af.itemRows[1].itemData.id
+    local _oGCP2, cy2 = _G.GetCursorPosition, 300
+    _G.GetCursorPosition = function() return 600, cy2 end
+    af.itemScroll._thumb._scripts.OnMouseDown(af.itemScroll._thumb, "LeftButton")
+    cy2 = 120
+    _G._TickAll(0.05)
+    local iOffDrag = af.itemScroll.offset
+    local iFirst1 = af.itemRows[1] and af.itemRows[1].itemData and af.itemRows[1].itemData.id
+    af.itemScroll._thumb._scripts.OnMouseUp(af.itemScroll._thumb, "LeftButton")
+    assert(iOffDrag > 0 and iFirst1 ~= iFirst0, "Dragging Explorer itemScroll thumb must scroll items! got off=" .. tostring(iOffDrag))
+    cy2 = 120
+    af.itemScroll._thumb._scripts.OnMouseDown(af.itemScroll._thumb, "LeftButton")
+    cy2 = 290
+    _G._TickAll(0.05)
+    af.itemScroll._thumb._scripts.OnMouseUp(af.itemScroll._thumb, "LeftButton")
+    assert(af.itemScroll.offset < iOffDrag, "Dragging thumb upward must scroll back up! got=" .. tostring(af.itemScroll.offset))
+
+    -- TalorianTopFrame scrollFrame buttons, drag & wheel
+    TalorianTP_ToggleTopWindow()
+    tick4()
+    local tf = _G.TalorianTopFrame
+    assert(tf and tf:IsShown() and tf.scrollFrame and tf.scrollFrame._bar and tf.scrollFrame._bar:IsShown(),
+        "TalorianTopFrame must display interactive scrollbar when rows > 14!")
+    tf.scrollFrame._dn._scripts.OnClick(tf.scrollFrame._dn, "LeftButton")
+    assert(tf.scrollFrame.offset > 0, "TalorianTopFrame dn button must scroll! got=" .. tostring(tf.scrollFrame.offset))
+    tf.scrollFrame._up._scripts.OnClick(tf.scrollFrame._up, "LeftButton")
+    assert(tf.scrollFrame.offset == 0, "TalorianTopFrame up button must return to 0! got=" .. tostring(tf.scrollFrame.offset))
+    cy2 = 300
+    tf.scrollFrame._thumb._scripts.OnMouseDown(tf.scrollFrame._thumb, "LeftButton")
+    cy2 = 100
+    _G._TickAll(0.05)
+    tf.scrollFrame._thumb._scripts.OnMouseUp(tf.scrollFrame._thumb, "LeftButton")
+    assert(tf.scrollFrame.offset > 0, "TalorianTopFrame thumb drag must scroll! got=" .. tostring(tf.scrollFrame.offset))
+    local sb = tf.scrollFrame._parent
+    sb._scripts.OnMouseWheel(sb, 1)
+    assert(tf.scrollFrame.offset >= 0, "TalorianTopFrame scrollBox OnMouseWheel must execute cleanly!")
+    af.zoneScroll:_ScrollTo(0)
+    af.zoneScroll._parent._scripts.OnMouseWheel(af.zoneScroll._parent, -1)
+    assert(af.zoneScroll.offset == 2, "Explorer leftBox wheel downward must step +2! got=" .. tostring(af.zoneScroll.offset))
+
+    -- AP_ValdrisPickerFrame interactive scrollbar when > 8 items exist
+    local _oGII3, _oGCS3, _oGCL3 = _G.GetItemInfo, _G.GetContainerNumSlots, _G.GetContainerItemLink
+    _G.GetContainerNumSlots = function(b) return b == 0 and 12 or 0 end
+    _G.GetContainerItemLink = function(b, s)
+        if b == 0 and s >= 1 and s <= 12 then
+            return "|cffa335ee|Hitem:" .. (999300 + s) .. ":0:0:0:0:0:0:0:80|h[ВальдрисТест" .. s .. "]|h|r"
+        end
+        return nil
+    end
+    _G.GetItemInfo = function(x)
+        local sid = tostring(x):match("9993(%d%d)")
+        if sid then
+            local id = 999300 + tonumber(sid)
+            return "ВальдрисТест" .. sid, "|cffa335ee|Hitem:" .. id .. ":0:0:0:0:0:0:0:80|h[ВальдрисТест" .. sid .. "]|h|r",
+                4, 245, 80, "Доспехи", "Латы", 1, "INVTYPE_CHEST", "Interface\\Icons\\INV_Misc_QuestionMark"
+        end
+        return _oGII3(x)
+    end
+    local _ipf4 = _G.ItemProgressFrame or CreateFrame("Frame", "ItemProgressFrame")
+    _ipf4:Show()
+    _G._FireEvent("CHAT_MSG_ADDON", "ASMSG_IPROG_OPEN", "1", "WHISPER", "TestHero")
+    if _G.AP_ValdrisAutoBar and _G.AP_ValdrisAutoBar.pickBtn then
+        _G.AP_ValdrisAutoBar.pickBtn._scripts.OnClick(_G.AP_ValdrisAutoBar.pickBtn, "LeftButton")
+    end
+    local vpf = _G.AP_ValdrisPickerFrame
+    assert(vpf and vpf.sf and vpf.sf._bar and vpf.sf._bar:IsShown(), "Valdris picker scrollbar must show with 12 items!")
+    vpf.sf._dn._scripts.OnClick(vpf.sf._dn, "LeftButton")
+    assert(vpf.offset > 0, "Valdris picker down button must advance offset! got=" .. tostring(vpf.offset))
+    cy2 = 240
+    vpf.sf._thumb._scripts.OnMouseDown(vpf.sf._thumb, "LeftButton")
+    cy2 = 120
+    _G._TickAll(0.05)
+    vpf.sf._thumb._scripts.OnMouseUp(vpf.sf._thumb, "LeftButton")
+    assert(vpf.offset >= 2, "Valdris picker thumb drag must scroll! got=" .. tostring(vpf.offset))
+    _G.GetCursorPosition = _oGCP2
+    _G.GetItemInfo, _G.GetContainerNumSlots, _G.GetContainerItemLink = _oGII3, _oGCS3, _oGCL3
 
     return "FULL_INTEGRATED_PASSED"
     ''')

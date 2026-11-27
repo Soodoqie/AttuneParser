@@ -202,65 +202,252 @@ do
         sf.visCount = visCount
         sf:EnableMouseWheel(true)
 
+        local BTN_H = 16
         local bar = CreateFrame("Frame", nil, sf)
-        bar:SetWidth(12)
+        bar:SetWidth(14)
+        bar:SetHeight(math.max(40, (listHeight or 100) - 4))
         bar:SetPoint("TOPRIGHT", sf, "TOPRIGHT", 0, -2)
         bar:SetPoint("BOTTOMRIGHT", sf, "BOTTOMRIGHT", 0, 2)
-        PS.StyleBox(bar, 0.65, false)
+        bar:SetFrameLevel(((sf.GetFrameLevel and sf:GetFrameLevel()) or 1) + 6)
+        bar:EnableMouse(true)
+        bar:EnableMouseWheel(true)
+        PS.StyleBox(bar, 0.72, false)
 
-        local up = CreateFrame("Button", nil, bar)
-        up:SetSize(12, 14)
-        up:SetPoint("TOP", bar, "TOP", 0, 0)
-        PS.StyleBtn(up, "dark")
-        local ufs = up:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-        ufs:SetPoint("CENTER", 0, 1); ufs:SetText("^")
+        local isDragging, dragStartY, dragStartOff = false, 0, 0
+        local up, dn, thumb
 
-        local dn = CreateFrame("Button", nil, bar)
-        dn:SetSize(12, 14)
-        dn:SetPoint("BOTTOM", bar, "BOTTOM", 0, 0)
-        PS.StyleBtn(dn, "dark")
-        local dfs = dn:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-        dfs:SetPoint("CENTER", 0, 1); dfs:SetText("v")
+        local function getCursorY()
+            if type(GetCursorPosition) ~= "function" then return nil end
+            local _, cy = GetCursorPosition()
+            if not cy then return nil end
+            local sc = (bar.GetEffectiveScale and bar:GetEffectiveScale()) or 1
+            if not sc or sc <= 0 then sc = 1 end
+            return cy / sc
+        end
 
-        local thumb = bar:CreateTexture(nil, "OVERLAY")
-        thumb:SetTexture(0.78, 0.62, 0.26, 0.85)
-        thumb:SetWidth(8)
-        thumb:SetHeight(24)
-        thumb:SetPoint("TOP", bar, "TOP", 0, -16)
+        local function paintThumb(active)
+            if not thumb then return end
+            if active then
+                thumb:SetBackdropColor(0.98, 0.78, 0.30, 1.0)
+                thumb:SetBackdropBorderColor(1.0, 0.92, 0.54, 1.0)
+            else
+                thumb:SetBackdropColor(0.82, 0.63, 0.22, 0.92)
+                thumb:SetBackdropBorderColor(1.0, 0.86, 0.38, 0.95)
+            end
+        end
 
         local function clampAndRefresh(newOff)
             local maxOff = math.max(0, (sf.total or 0) - visCount)
+            newOff = math.floor((newOff or 0) + 0.5)
             if newOff < 0 then newOff = 0 end
             if newOff > maxOff then newOff = maxOff end
             sf.offset = newOff
             if maxOff <= 0 then
+                isDragging = false
                 bar:Hide()
             else
                 bar:Show()
-                local bh = bar:GetHeight()
-                if not bh or bh <= 1 then bh = listHeight end
-                local trackH = math.max(24, bh - 34)
-                local thumbH = math.max(18, math.floor(trackH * (visCount / math.max(1, sf.total))))
+                local bTop = bar.GetTop and bar:GetTop()
+                local bBot = bar.GetBottom and bar:GetBottom()
+                local bh = (bTop and bBot and (bTop > bBot)) and (bTop - bBot) or bar:GetHeight()
+                if not bh or bh <= 1 then bh = math.max(40, (listHeight or 100) - 4) end
+                local trackH = math.max(24, bh - (BTN_H * 2 + 4))
+                local thumbH = math.max(20, math.floor(trackH * (visCount / math.max(1, sf.total))))
                 if thumbH > trackH then thumbH = trackH end
-                thumb:SetHeight(thumbH)
                 local travel = math.max(0, trackH - thumbH)
-                local yOff = (maxOff > 0) and math.floor(travel * (sf.offset / maxOff)) or 0
-                thumb:ClearAllPoints()
-                thumb:SetPoint("TOP", bar, "TOP", 0, -(17 + yOff))
+                sf._trackH = trackH
+                sf._thumbH = thumbH
+                sf._travel = travel
+                if thumb then
+                    thumb:SetHeight(thumbH)
+                    local yOff = (maxOff > 0) and math.floor(travel * (sf.offset / maxOff) + 0.5) or 0
+                    thumb:ClearAllPoints()
+                    thumb:SetPoint("TOP", bar, "TOP", 0, -(BTN_H + 2 + yOff))
+                end
             end
             if onUpdateFn then onUpdateFn(sf.offset) end
         end
 
-        sf:SetScript("OnMouseWheel", function(_, delta)
+        local function makeArrow(isUp)
+            local b = CreateFrame("Button", nil, bar)
+            b:SetSize(14, BTN_H)
+            b:SetPoint(isUp and "TOP" or "BOTTOM", bar, isUp and "TOP" or "BOTTOM", 0, 0)
+            b:SetFrameLevel(((bar.GetFrameLevel and bar:GetFrameLevel()) or 1) + 2)
+            b:EnableMouse(true)
+            b:EnableMouseWheel(true)
+            PS.StyleBox(b, 0.92, false)
+            b:SetBackdropBorderColor(0.58, 0.48, 0.25, 0.92)
+            local hl = b:CreateTexture(nil, "HIGHLIGHT")
+            hl:SetPoint("TOPLEFT", 1, -1)
+            hl:SetPoint("BOTTOMRIGHT", -1, 1)
+            hl:SetTexture(0.95, 0.78, 0.28, 0.28)
+            b:SetHighlightTexture(hl)
+            local fs = b:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+            fs:SetPoint("CENTER", 0, isUp and -1 or 1)
+            fs:SetText(isUp and "^" or "v")
+            fs:SetTextColor(0.98, 0.84, 0.36)
+            b._fs = fs
+            local stepMag = math.max(1, math.floor(visCount / 5))
+            b._step = isUp and -stepMag or stepMag
+            b:SetScript("OnEnter", function(self)
+                self:SetBackdropBorderColor(0.96, 0.78, 0.30, 1)
+            end)
+            b:SetScript("OnLeave", function(self)
+                if not self._held then self:SetBackdropBorderColor(0.58, 0.48, 0.25, 0.92) end
+            end)
+            b:SetScript("OnMouseDown", function(self, mBtn)
+                if mBtn and mBtn ~= "LeftButton" then return end
+                self._held = true
+                self._holdT = 0
+                self._repT = 0
+                self._upAt = nil
+                self._mouseStepped = true
+                self:SetBackdropBorderColor(1.0, 0.86, 0.36, 1)
+                clampAndRefresh((sf.offset or 0) + self._step)
+            end)
+            b:SetScript("OnMouseUp", function(self)
+                self._held = false
+                self._holdT = 0
+                self._repT = 0
+                self._upAt = 0
+                self:SetBackdropBorderColor(0.58, 0.48, 0.25, 0.92)
+            end)
+            b:SetScript("OnClick", function(self)
+                if self._mouseStepped then
+                    self._mouseStepped = false
+                    self._upAt = nil
+                    return
+                end
+                clampAndRefresh((sf.offset or 0) + self._step)
+            end)
+            return b
+        end
+
+        up = makeArrow(true)
+        dn = makeArrow(false)
+
+        thumb = CreateFrame("Button", nil, bar)
+        thumb:SetSize(12, 24)
+        thumb:SetPoint("TOP", bar, "TOP", 0, -(BTN_H + 2))
+        thumb:SetFrameLevel(((bar.GetFrameLevel and bar:GetFrameLevel()) or 1) + 2)
+        thumb:EnableMouse(true)
+        thumb:EnableMouseWheel(true)
+        PS.StyleBox(thumb, 0.94, true)
+        paintThumb(false)
+        local thl = thumb:CreateTexture(nil, "HIGHLIGHT")
+        thl:SetPoint("TOPLEFT", 1, -1)
+        thl:SetPoint("BOTTOMRIGHT", -1, 1)
+        thl:SetTexture(1.0, 0.88, 0.42, 0.26)
+        thumb:SetHighlightTexture(thl)
+
+        thumb:SetScript("OnEnter", function() paintThumb(true) end)
+        thumb:SetScript("OnLeave", function() if not isDragging then paintThumb(false) end end)
+        thumb:SetScript("OnMouseDown", function(_, mBtn)
+            if mBtn and mBtn ~= "LeftButton" then return end
+            local maxOff = math.max(0, (sf.total or 0) - visCount)
+            if maxOff <= 0 then return end
+            local cy = getCursorY()
+            dragStartY = cy or 0
+            dragStartOff = sf.offset or 0
+            isDragging = (cy ~= nil)
+            paintThumb(true)
+        end)
+        thumb:SetScript("OnMouseUp", function()
+            isDragging = false
+            paintThumb(false)
+        end)
+
+        bar:SetScript("OnMouseDown", function(self, mBtn)
+            if mBtn and mBtn ~= "LeftButton" then return end
+            local maxOff = math.max(0, (sf.total or 0) - visCount)
+            if maxOff <= 0 then return end
+            local cy = getCursorY()
+            local bTop = self.GetTop and self:GetTop()
+            local travel = sf._travel or 0
+            if cy and bTop and travel > 0 then
+                local frac = ((bTop - (BTN_H + 2)) - (sf._thumbH or 20) * 0.5 - cy) / travel
+                if frac < 0 then frac = 0 elseif frac > 1 then frac = 1 end
+                clampAndRefresh(math.floor(frac * maxOff + 0.5))
+                dragStartY = cy
+                dragStartOff = sf.offset or 0
+                isDragging = true
+                paintThumb(true)
+            else
+                local pg = math.max(1, visCount - 1)
+                local bCen = (bTop and self.GetBottom and self:GetBottom()) and ((bTop + self:GetBottom()) * 0.5)
+                if cy and bCen and cy > bCen then pg = -pg end
+                clampAndRefresh((sf.offset or 0) + pg)
+            end
+        end)
+        bar:SetScript("OnMouseUp", function()
+            isDragging = false
+            paintThumb(false)
+        end)
+        bar:SetScript("OnHide", function()
+            isDragging = false
+            up._held = false; up._mouseStepped = false; up._upAt = nil
+            dn._held = false; dn._mouseStepped = false; dn._upAt = nil
+            paintThumb(false)
+        end)
+        bar:SetScript("OnUpdate", function(_, elapsed)
+            if not isDragging and not up._held and not dn._held and not up._mouseStepped and not dn._mouseStepped then
+                return
+            end
+            local el = elapsed or 0
+            if isDragging then
+                local cy = getCursorY()
+                local travel = sf._travel or 0
+                local maxOff = math.max(0, (sf.total or 0) - visCount)
+                if cy and travel > 0 and maxOff > 0 then
+                    local dy = dragStartY - cy
+                    local tgt = math.floor(dragStartOff + (dy / travel) * maxOff + 0.5)
+                    if tgt < 0 then tgt = 0 elseif tgt > maxOff then tgt = maxOff end
+                    if tgt ~= (sf.offset or 0) then clampAndRefresh(tgt) end
+                end
+            end
+            for _, btn in ipairs({ up, dn }) do
+                if btn._held then
+                    btn._holdT = (btn._holdT or 0) + el
+                    if btn._holdT >= 0.28 then
+                        btn._repT = (btn._repT or 0) + el
+                        if btn._repT >= 0.065 then
+                            btn._repT = 0
+                            clampAndRefresh((sf.offset or 0) + btn._step)
+                        end
+                    end
+                elseif btn._mouseStepped then
+                    btn._upAt = (btn._upAt or 0) + el
+                    if btn._upAt >= 0.12 then
+                        btn._mouseStepped = false
+                        btn._upAt = nil
+                    end
+                end
+            end
+        end)
+
+        local function onWheel(_, delta)
             local step = (delta > 0) and -2 or 2
             clampAndRefresh((sf.offset or 0) + step)
-        end)
-        up:SetScript("OnClick", function() clampAndRefresh((sf.offset or 0) - 3) end)
-        dn:SetScript("OnClick", function() clampAndRefresh((sf.offset or 0) + 3) end)
+        end
+        sf:SetScript("OnMouseWheel", onWheel)
+        bar:SetScript("OnMouseWheel", onWheel)
+        up:SetScript("OnMouseWheel", onWheel)
+        dn:SetScript("OnMouseWheel", onWheel)
+        thumb:SetScript("OnMouseWheel", onWheel)
 
         function sf:SetTotal(totalCount, keepOffset)
             sf.total = totalCount or 0
             clampAndRefresh(keepOffset and (sf.offset or 0) or 0)
+        end
+        sf._bar = bar
+        sf._up = up
+        sf._dn = dn
+        sf._thumb = thumb
+        sf._OnWheel = function(arg1, arg2, arg3)
+            onWheel(sf, (type(arg1) == "number" and arg1) or (type(arg2) == "number" and arg2) or arg3 or 0)
+        end
+        sf._ScrollTo = function(arg1, arg2)
+            clampAndRefresh((type(arg1) == "number" and arg1) or arg2 or 0)
         end
         return sf
     end
@@ -454,7 +641,7 @@ local function CreateLocationDropdown(parentBox, anchorBtn, onSelectFn)
         local r = CreateFrame("Button", nil, sf)
         r:SetHeight(RH - 1)
         r:SetPoint("TOPLEFT", sf, "TOPLEFT", 0, -(i - 1) * RH)
-        r:SetPoint("TOPRIGHT", sf, "TOPRIGHT", -14, -(i - 1) * RH)
+        r:SetPoint("TOPRIGHT", sf, "TOPRIGHT", -16, -(i - 1) * RH)
         PS.StyleScrollRow(r, (i % 2) == 1)
 
         r.txt = r:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
@@ -974,6 +1161,7 @@ local function BuildTopTab(parent)
     local sf = PS.AttachScroll(listBox, VIS * ROW_H, ROW_H, VIS, function() box.RenderRows() end)
     sf:SetPoint("TOPLEFT", listBox, "TOPLEFT", 4, -4)
     sf:SetPoint("BOTTOMRIGHT", listBox, "BOTTOMRIGHT", -4, 4)
+    box.sf = sf
 
     for i = 1, VIS do
         local r = CreateTopRow(sf, i)
@@ -1819,6 +2007,7 @@ local function BuildBagsTab(parent)
     local sf = PS.AttachScroll(listBox, VIS * ROW_H, ROW_H, VIS, function() box.RenderRows() end)
     sf:SetPoint("TOPLEFT", listBox, "TOPLEFT", 4, -4)
     sf:SetPoint("BOTTOMRIGHT", listBox, "BOTTOMRIGHT", -4, 4)
+    box.sf = sf
 
     for i = 1, VIS do
         local r = CreateFrame("Button", nil, sf)
@@ -2112,6 +2301,7 @@ local function BuildSetsTab(parent)
     local sfLeft = PS.AttachScroll(leftPane, SVIS * SROW_H, SROW_H, SVIS, function() box.RenderLeft() end)
     sfLeft:SetPoint("TOPLEFT", leftPane, "TOPLEFT", 4, -4)
     sfLeft:SetPoint("BOTTOMRIGHT", leftPane, "BOTTOMRIGHT", -4, 4)
+    box.sfLeft = sfLeft
 
     for i = 1, SVIS do
         local r = CreateFrame("Button", nil, sfLeft)
@@ -2157,12 +2347,13 @@ local function BuildSetsTab(parent)
     local sfRight = PS.AttachScroll(slotBox, RVIS * RROW_H, RROW_H, RVIS, function() box.RenderRight() end)
     sfRight:SetPoint("TOPLEFT", slotBox, "TOPLEFT", 0, 0)
     sfRight:SetPoint("BOTTOMRIGHT", slotBox, "BOTTOMRIGHT", 0, 0)
+    box.sfRight = sfRight
 
     for i = 1, RVIS do
         local r = CreateFrame("Button", nil, sfRight)
         r:SetHeight(RROW_H - 3)
         r:SetPoint("TOPLEFT", sfRight, "TOPLEFT", 0, -(i - 1) * RROW_H)
-        r:SetPoint("TOPRIGHT", sfRight, "TOPRIGHT", -14, -(i - 1) * RROW_H)
+        r:SetPoint("TOPRIGHT", sfRight, "TOPRIGHT", -16, -(i - 1) * RROW_H)
         PS.StyleScrollRow(r, (i % 2) == 1)
 
         local icBox = CreateFrame("Frame", nil, r)

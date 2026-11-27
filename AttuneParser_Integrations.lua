@@ -7591,11 +7591,20 @@ do
         pf.emptyFs = emptyFs
 
         local ROWS = 8
+        local RenderValdrisRows
+        local sf = PS.AttachScroll(pf, ROWS * 33, 33, ROWS, function(offArg)
+            pf.offset = offArg or 0
+            if RenderValdrisRows then RenderValdrisRows() end
+        end)
+        sf:SetPoint("TOPLEFT", pf, "TOPLEFT", 10, -56)
+        sf:SetPoint("BOTTOMRIGHT", pf, "BOTTOMRIGHT", -8, 28)
+        pf.sf = sf
+
         local rows = {}
         for i = 1, ROWS do
-            local r = CreateFrame("Button", nil, pf)
-            r:SetSize(462, 32)
-            r:SetPoint("TOPLEFT", 10, -56 - (i - 1) * 33)
+            local r = CreateFrame("Button", nil, sf)
+            r:SetSize(446, 32)
+            r:SetPoint("TOPLEFT", 0, -(i - 1) * 33)
             PS.StyleBox(r, 0.55, false)
 
             local icBox = CreateFrame("Frame", nil, r)
@@ -7630,21 +7639,21 @@ do
 
             local nm = r:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
             nm:SetPoint("TOPLEFT", icBox, "TOPRIGHT", 6, -1)
-            nm:SetSize(308, 14)
+            nm:SetSize(294, 14)
             nm:SetJustifyH("LEFT")
             if nm.SetWordWrap then nm:SetWordWrap(false) end
             r.nameFs = nm
 
             local sub = r:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
             sub:SetPoint("BOTTOMLEFT", icBox, "BOTTOMRIGHT", 6, 1)
-            sub:SetSize(308, 12)
+            sub:SetSize(294, 12)
             sub:SetJustifyH("LEFT")
             if sub.SetWordWrap then sub:SetWordWrap(false) end
             r.subFs = sub
 
             local st = r:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
             st:SetPoint("RIGHT", r, "RIGHT", -6, 0)
-            st:SetSize(106, 26)
+            st:SetSize(104, 26)
             st:SetJustifyH("RIGHT")
             r.statusFs = st
 
@@ -7713,7 +7722,7 @@ do
 
         local footFs = pf:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
         footFs:SetPoint("BOTTOMLEFT", 10, 8)
-        footFs:SetText("Колесо: прокрутка | Alt+ЛКМ: сумка или слот персонажа")
+        footFs:SetText("Колесо / ползунок: прокрутка | Alt+ЛКМ: сумка или слот")
         pf.footFs = footFs
 
         local pageFs = pf:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
@@ -7721,24 +7730,14 @@ do
         pf.pageFs = pageFs
 
         pf:EnableMouseWheel(true)
-        pf:SetScript("OnMouseWheel", function(self, delta)
-            local mx = math_max(0, #(self.listData or {}) - ROWS)
-            self.offset = math_max(0, math_floor((self.offset or 0) - delta * 2))
-            if self.offset > mx then self.offset = mx end
-            RefreshValdrisPicker()
+        pf:SetScript("OnMouseWheel", function(_, delta)
+            if sf and sf._OnWheel then sf:_OnWheel(delta) end
         end)
 
-        RefreshValdrisPicker = function()
+        RenderValdrisRows = function()
             if not vpPicker then return end
-            for _, b in ipairs(vpPicker.filterBtns or {}) do
-                PS.PaintBtn(b, b.key == vpPicker.filterKind and "green" or "dark")
-            end
-            local txt = vpPicker.searchBox and vpPicker.searchBox:GetText() or ""
-            local data = AP:GetValdrisPickerItems(vpPicker.filterKind, txt)
-            vpPicker.listData = data
+            local data = vpPicker.listData or {}
             local total = #data
-            local mx = math_max(0, total - ROWS)
-            if (vpPicker.offset or 0) > mx then vpPicker.offset = mx end
             local off = vpPicker.offset or 0
             if total == 0 then vpPicker.emptyFs:Show() else vpPicker.emptyFs:Hide() end
             for i = 1, ROWS do
@@ -7774,6 +7773,23 @@ do
                 end
             end
             vpPicker.pageFs:SetText(string.format("%d/%d", total > 0 and (off + 1) or 0, total))
+        end
+
+        RefreshValdrisPicker = function()
+            if not vpPicker then return end
+            for _, b in ipairs(vpPicker.filterBtns or {}) do
+                PS.PaintBtn(b, b.key == vpPicker.filterKind and "green" or "dark")
+            end
+            local txt = vpPicker.searchBox and vpPicker.searchBox:GetText() or ""
+            local data = AP:GetValdrisPickerItems(vpPicker.filterKind, txt)
+            vpPicker.listData = data
+            local total = #data
+            if vpPicker.sf then
+                vpPicker.sf.offset = vpPicker.offset or 0
+                vpPicker.sf:SetTotal(total, true)
+            else
+                RenderValdrisRows()
+            end
         end
         SS.valdrisRefreshPicker = function()
             if vpPicker and vpPicker:IsShown() then RefreshValdrisPicker() end
