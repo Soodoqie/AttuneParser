@@ -253,7 +253,9 @@ function CreateFrame(ftype, name, parent, template)
     function f:SetFontObject() end
     function f:GetFontObject() return "GameFontHighlightSmall" end
     function f:GetStringWidth() return #(self._text or "") * 6 end
-    function f:ClearFocus() end
+    function f:SetFocus() self._focused = true end
+    function f:ClearFocus() self._focused = false end
+    function f:HasFocus() return self._focused == true end
     function f:SetChecked() end
     function f:GetChecked() return false end
     function f:SetScale() end
@@ -283,6 +285,8 @@ UISpecialFrames = {}
 StaticPopupDialogs = {}
 function StaticPopup_Show(k) _G._LAST_POPUP = k end
 SlashCmdList = {}
+function FauxScrollFrame_GetOffset() return 0 end
+function FauxScrollFrame_Update() end
 
 local _realMac = function(key, val)
     table.insert(_G._MAC_CALLS, { key = key, val = val })
@@ -1817,6 +1821,45 @@ def run_tests():
     print("LUPA RESULT:", res)
     assert res == "ALL_21_SUITES_PASSED"
     run_suite_21de(lua)
+    res21f = lua.execute(r'''
+    -- 21f: TalorianTP windows register once in UISpecialFrames and clear EditBox focus cleanly for ESC
+    local ui21f = TalorianTP:OpenUI(4)
+    assert(ui21f and ui21f:IsShown() and _G.TalorianMainFrame == ui21f, "TalorianMainFrame must open")
+    if _G.TalorianBugLinkEditBox and _G.TalorianBugLinkEditBox.SetFocus then
+        _G.TalorianBugLinkEditBox:SetFocus()
+        assert(_G.TalorianBugLinkEditBox:HasFocus() == true)
+    end
+    ui21f:SwitchTab(1)
+    if _G.TalorianBugLinkEditBox and _G.TalorianBugLinkEditBox.HasFocus then
+        assert(_G.TalorianBugLinkEditBox:HasFocus() == false, "Switching tab must clear bugEdit focus!")
+    end
+    if TalorianTP_ToggleAnalysisWindow then TalorianTP_ToggleAnalysisWindow() end
+    if TalorianTP_ToggleTopWindow then TalorianTP_ToggleTopWindow() end
+    local seenSpecial = {}
+    for _, nm in ipairs(_G.UISpecialFrames or {}) do
+        seenSpecial[nm] = (seenSpecial[nm] or 0) + 1
+    end
+    assert(seenSpecial["TalorianMainFrame"] == 1, "TalorianMainFrame must be registered once in UISpecialFrames!")
+    assert(seenSpecial["TalorianAnalysisFrame"] == 1, "TalorianAnalysisFrame must be registered once in UISpecialFrames!")
+    assert(seenSpecial["TalorianTopFrame"] == 1, "TalorianTopFrame must be registered once in UISpecialFrames!")
+    assert(_G.TalorianAnalysisFrame:IsShown() and _G.TalorianTopFrame:IsShown(), "Analysis & Top windows must open cleanly")
+    -- Re-focus on tab 4 then simulate ESC CloseSpecialWindows()
+    ui21f:SwitchTab(4)
+    if _G.TalorianBugLinkEditBox and _G.TalorianBugLinkEditBox.SetFocus then _G.TalorianBugLinkEditBox:SetFocus() end
+    for _, nm in ipairs(_G.UISpecialFrames or {}) do
+        local fr = _G[nm]
+        if fr and fr:IsShown() then fr:Hide() end
+    end
+    assert(not ui21f:IsShown(), "ESC CloseSpecialWindows must hide TalorianMainFrame!")
+    assert(not _G.TalorianAnalysisFrame:IsShown(), "ESC CloseSpecialWindows must hide TalorianAnalysisFrame!")
+    assert(not _G.TalorianTopFrame:IsShown(), "ESC CloseSpecialWindows must hide TalorianTopFrame!")
+    if _G.TalorianBugLinkEditBox and _G.TalorianBugLinkEditBox.HasFocus then
+        assert(_G.TalorianBugLinkEditBox:HasFocus() == false, "Hiding TalorianMainFrame must clear bugEdit focus!")
+    end
+    return "SUITE_21F_PASSED"
+    ''')
+    assert res21f == "SUITE_21F_PASSED"
+    print("LUPA 21F:", res21f)
     run_real_attune_parser_core_tests()
 
 
