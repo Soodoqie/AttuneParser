@@ -2323,6 +2323,27 @@ local function BuildSettingsTab(parent)
     return box
 end
 
+local raiseQueue = {}
+local raiseDriver = CreateFrame("Frame")
+raiseDriver:Hide()
+raiseDriver:SetScript("OnUpdate", function(self)
+    self:Hide()
+    for fr in pairs(raiseQueue) do
+        raiseQueue[fr] = nil
+        if fr and fr:IsShown() and type(fr.Raise) == "function" then
+            pcall(fr.Raise, fr)
+        end
+    end
+end)
+
+local function RaiseFrameFront(fr)
+    if not fr then return end
+    if type(fr.Raise) == "function" then pcall(fr.Raise, fr) end
+    raiseQueue[fr] = true
+    raiseDriver:Show()
+end
+AP.RaiseFrameFront = RaiseFrameFront
+
 local function CreateMainWindow()
     if mainFrame then return mainFrame end
     local f = CreateFrame("Frame", "AttuneParserFrame", UIParent)
@@ -2504,6 +2525,7 @@ function AP:OpenUI(tabKey)
         f.activeTab = tabKey
     end
     f:Show()
+    RaiseFrameFront(f)
     AP:RefreshUI()
 end
 

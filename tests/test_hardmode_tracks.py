@@ -47,6 +47,7 @@ _G._SENT_SRV = {}
 _G._SENT_ADDON = {}
 _G._MAC_CALLS = {}
 _G._FRAMES = {}
+_G._REGIONS = {}
 _G._TIME = 100.0
 _G._IN_COMBAT = false
 _G._MONEY = 25000 * 10000
@@ -151,8 +152,8 @@ function SendAddonMessage(prefix, body, dist, target)
     table.insert(_G._SENT_ADDON, { prefix = prefix, body = body, dist = dist, target = target })
 end
 
-local function MakeRegion(kind)
-    local r = { _kind = kind, _shown = true, _text = "" }
+local function MakeRegion(kind, parent)
+    local r = { _kind = kind, _parent = parent, _shown = true, _text = "" }
     function r:SetPoint() assert(self == r, "Attempt to find 'this' in non-table object (used '.' instead of ':' ?)") end
     function r:ClearAllPoints() end
     function r:SetAllPoints() end
@@ -180,12 +181,13 @@ local function MakeRegion(kind)
     function r:Hide() assert(self == r, "Attempt to find 'this' in non-table object"); self._shown = false end
     function r:IsShown() return self._shown end
     function r:GetObjectType() return self._kind end
+    table.insert(_G._REGIONS, r)
     return r
 end
 
 function CreateFrame(ftype, name, parent, template)
     local f = {
-        _ftype = ftype, _name = name, _events = {}, _scripts = {}, _children = {},
+        _ftype = ftype, _name = name, _parent = parent, _events = {}, _scripts = {}, _children = {},
         _shown = true, _attrs = {},
     }
     if name then _G[name] = f end
@@ -231,7 +233,12 @@ function CreateFrame(ftype, name, parent, template)
     function f:IsShown() return self._shown and 1 or nil end
     function f:IsVisible() return self._shown and 1 or nil end
     function f:SetAlpha() end
-    function f:Raise() end
+    function f:Raise()
+        _G._RAISE_SEQ = (_G._RAISE_SEQ or 0) + 1
+        self._raisedAt = _G._RAISE_SEQ
+        _G._RAISE_LOG = _G._RAISE_LOG or {}
+        table.insert(_G._RAISE_LOG, self._name or "<anon>")
+    end
     function f:Enable() end
     function f:Disable() end
     function f:SetHighlightTexture() end
@@ -262,8 +269,8 @@ function CreateFrame(ftype, name, parent, template)
     function f:GetScale() return 1 end
     function f:StartMoving() end
     function f:StopMovingOrSizing() end
-    function f:CreateTexture() return MakeRegion("Texture") end
-    function f:CreateFontString() return MakeRegion("FontString") end
+    function f:CreateTexture() return MakeRegion("Texture", self) end
+    function f:CreateFontString() return MakeRegion("FontString", self) end
     function f:GetRegions() return {} end
     function f:SetOwner() end
     function f:ClearLines() end
@@ -437,7 +444,17 @@ function AP:GetRecommendations() return {}, 0, 0 end
 function AP:GetNoReqLevelItems() return {}, 0, 0, 0 end
 function AP:GetItemDiffTag() return "" end
 function AP:IsZoneInstance() return false end
-function AP:OpenTalorianUI() end
+function AP:OpenTalorianUI()
+    local b = AP._talorianBridge
+    if b and type(b.OpenUI) == "function" then
+        b.OpenUI()
+        if type(AP.RaiseFrameFront) == "function" then
+            AP.RaiseFrameFront(rawget(_G, "TalorianMainFrame"))
+        end
+        return true
+    end
+    return false
+end
 function AP:StartBackgroundScan() end
 function AP:ClaimAllMilestones() return 0 end
 function AP:InvalidateCaches() end
@@ -1954,6 +1971,124 @@ def run_tests():
     if _G.TalorianBugLinkEditBox and _G.TalorianBugLinkEditBox.HasFocus then
         assert(_G.TalorianBugLinkEditBox:HasFocus() == false, "Hiding TalorianMainFrame must clear bugEdit focus!")
     end
+
+    -- 21i: Z-order priority (RaiseFrameFront), Tab 1 & Tab 5 UI polish, and Interactive Zone/Dungeon Item Explorer
+    local function tickUpdates21i()
+        for _, fr in ipairs(_G._FRAMES) do
+            if fr and fr:IsShown() and fr._scripts and fr._scripts.OnUpdate then
+                fr._scripts.OnUpdate(fr, 0.05)
+            end
+        end
+    end
+
+    local ui21i = TalorianTP:OpenUI(1)
+    assert(ui21i:GetWidth() == 896, "21i: TalorianMainFrame must be widened to 896, got=" .. tostring(ui21i:GetWidth()))
+    tickUpdates21i()
+
+    -- Simulate clicking atlasBtn while TalorianMainFrame had Toplevel focus
+    ui21i:Raise()
+    AttuneParser:OpenUI("top")
+    tickUpdates21i()
+    assert(_G.AttuneParserFrame and _G.AttuneParserFrame:IsShown(), "21i: AttuneParserFrame must show")
+    assert((_G.AttuneParserFrame._raisedAt or 0) > (ui21i._raisedAt or 0),
+        "21i: AttuneParserFrame must raise ABOVE TalorianMainFrame on open!")
+
+    -- Already-open buried window must still rise on re-open
+    ui21i:Raise()
+    AttuneParser:OpenUI("top")
+    tickUpdates21i()
+    assert((_G.AttuneParserFrame._raisedAt or 0) > (ui21i._raisedAt or 0),
+        "21i: Already-shown AttuneParserFrame must raise ABOVE TalorianMainFrame!")
+
+    -- Symmetrically opening Talorian from AttuneParser must raise TalorianMainFrame on top
+    AttuneParser:OpenTalorianUI()
+    tickUpdates21i()
+    assert((ui21i._raisedAt or 0) > (_G.AttuneParserFrame._raisedAt or 0),
+        "21i: OpenTalorianUI must raise TalorianMainFrame ABOVE AttuneParserFrame!")
+
+    -- Opening Analysis/Explorer must raise TalorianAnalysisFrame above TalorianMainFrame
+    ui21i:Raise()
+    TalorianTP_ToggleAnalysisWindow()
+    tickUpdates21i()
+    local af21i = _G.TalorianAnalysisFrame
+    assert(af21i and af21i:IsShown() and (af21i._raisedAt or 0) > (ui21i._raisedAt or 0),
+        "21i: TalorianAnalysisFrame must raise ABOVE TalorianMainFrame!")
+
+    -- Verify Interactive Zone/Dungeon Item Explorer populates both left zones and right zone items
+    assert(af21i.zoneRows and af21i.zoneRows[1] and af21i.zoneRows[1]:IsShown() and af21i.zoneRows[1].zoneRec,
+        "21i: Explorer must populate left raid/dungeon rows!")
+    local selTit = af21i.selTitle and af21i.selTitle:GetText() or ""
+    assert(selTit:find("Цитадель Ледяной Короны", 1, true),
+        "21i: Explorer must default-select active targetRaid! got=" .. tostring(selTit))
+    -- Switch status filter to "all" so ICC items appear even if absorbed
+    local allStatusBtn = nil
+    for _, sb in ipairs(af21i.statusBtns or {}) do
+        if sb.id == "all" then allStatusBtn = sb end
+    end
+    assert(allStatusBtn and allStatusBtn._scripts and allStatusBtn._scripts.OnClick, "21i: expected 'all' status button")
+    allStatusBtn._scripts.OnClick(allStatusBtn, "LeftButton")
+    assert(af21i.itemRows and af21i.itemRows[1] and af21i.itemRows[1]:IsShown() and af21i.itemRows[1].itemData,
+        "21i: Explorer must show interactive item rows in right pane for selected instance!")
+    -- Hover row safely triggers GameTooltip without errors
+    if af21i.itemRows[1]._scripts and af21i.itemRows[1]._scripts.OnEnter then
+        af21i.itemRows[1]._scripts.OnEnter(af21i.itemRows[1])
+    end
+    -- Click second zone on left and set as Talorian target
+    if af21i.zoneRows[2] and af21i.zoneRows[2]:IsShown() and af21i.zoneRows[2]._scripts and af21i.zoneRows[2]._scripts.OnClick then
+        local z2Name = af21i.zoneRows[2].zoneRec.dest.name
+        af21i.zoneRows[2]._scripts.OnClick(af21i.zoneRows[2])
+        assert((af21i.selTitle:GetText() or ""):find(z2Name, 1, true), "21i: clicking zone row must switch selected zone!")
+        if af21i.targetBtn and af21i.targetBtn._scripts and af21i.targetBtn._scripts.OnClick then
+            af21i.targetBtn._scripts.OnClick(af21i.targetBtn)
+            assert(TalorianTP_DB.targetRaid == z2Name, "21i: targetBtn must set TalorianTP_DB.targetRaid!")
+        end
+    end
+    af21i:Hide()
+    _G.AttuneParserFrame:Hide()
+
+    -- Tab 5 polish checks: Pepe skin/perk labels, Russian gold format, accurate U torgovtsa label, no old jargon
+    ui21i:SwitchTab(5)
+    assert(ui21i.tabs and ui21i.tabs[5] and ui21i.tabs[5].txt:GetText() == "Спутники и Наборы",
+        "21i: Tab 5 title must be 'Спутники и Наборы'! got=" .. tostring(ui21i.tabs and ui21i.tabs[5] and ui21i.tabs[5].txt:GetText()))
+    local _origPepeSel = _G.PrimePepe and _G.PrimePepe.sel
+    local _origPepeSlots = _G.PrimePepe and _G.PrimePepe.slots
+    if _G.PrimePepe then _G.PrimePepe.sel = 1; _G.PrimePepe.slots = 1 end
+    TalorianTP.serverCtrl.gv.balance = 0
+    TalorianTP.serverCtrl.pepe.cur = 1
+    TalorianTP.serverCtrl.pepe.sel = 1 -- bit 0 -> index 1
+    TalorianTP.serverCtrl.pepe.slots = 1
+    if ui21i.serverPanel and ui21i.serverPanel.Refresh then ui21i.serverPanel:Refresh() end
+    if _G.PrimePepe then _G.PrimePepe.sel = _origPepeSel; _G.PrimePepe.slots = _origPepeSlots end
+
+    -- Check created regions text specifically inside Tab 5 (ui21i.serverPanel)
+    local function isInside21i(node, anc)
+        local cur = node and node._parent
+        while cur do
+            if cur == anc then return true end
+            cur = cur._parent
+        end
+        return false
+    end
+    local sawRuGold, sawRawEnGold, sawBadAutomail, sawMerchPerkLbl, sawPepeClean, sawBareHash1 = false, false, false, false, false, false
+    local function checkStr21i(s)
+        if type(s) ~= "string" then return end
+        if s:find("0 зол.", 1, true) then sawRuGold = true end
+        if s:find("0g 00s", 1, true) then sawRawEnGold = true end
+        if s:find("Автопродажа:", 1, true) then sawBadAutomail = true end
+        if s:find("У торговца:", 1, true) then sawMerchPerkLbl = true end
+        if s:find("Облик #1", 1, true) and s:find("Бонус #1", 1, true) then sawPepeClean = true end
+        if s == "#1" then sawBareHash1 = true end
+    end
+    for _, rg in ipairs(_G._REGIONS or {}) do
+        if isInside21i(rg, ui21i.serverPanel) then
+            checkStr21i(rg._text)
+        end
+    end
+    assert(sawRuGold and not sawRawEnGold, "21i: GoldVault must display Russian gold ('0 зол.') instead of '0g 00s'!")
+    assert(sawMerchPerkLbl and not sawBadAutomail, "21i: Tab 5 must use 'У торговца:' instead of misleading 'Автопродажа:'!")
+    assert(sawPepeClean and not sawBareHash1, "21i: Tab 5 Pepe must show 'Облик #1' / 'Бонус #1' instead of bare '#1'! sawPepeClean=" .. tostring(sawPepeClean))
+    ui21i:Hide()
+
     return "SUITE_21F_PASSED"
     ''')
     assert res21f == "SUITE_21F_PASSED"
@@ -2339,6 +2474,13 @@ def run_real_attune_parser_core_tests():
     AP.forgeBag = {}
     AP:InvalidateCaches(true)
 
+    _G._RAISE_SEQ = 100
+    AP:OpenUI("top")
+    for _, fr in ipairs(_G._FRAMES) do
+        if fr and fr:IsShown() and fr._scripts and fr._scripts.OnUpdate then fr._scripts.OnUpdate(fr, 0.05) end
+    end
+    assert((_G.AttuneParserFrame._raisedAt or 0) > 100, "Core AP:OpenUI must call Raise() on AttuneParserFrame!")
+
     return "REAL_AP_CORE_PASSED"
     ''')
     print("REAL AP CORE RESULT:", res2)
@@ -2375,6 +2517,63 @@ def run_standalone_integrations_tests():
     print("STANDALONE AP INTEGRATIONS: PASSED")
 
 
+def run_real_full_integrated_tests():
+    lua4 = lupa.LuaRuntime(unpack_returned_tuples=True)
+    lua4.execute(WOW_SHIM)
+    lua4.execute(r'''
+    _G.ResourceBank = { usedEntries = 0, maxEntries = 120, contents = {} }
+    _G.PRIME_ItemBank = { items = {}, byGuid = {}, cap = 100 }
+    ''')
+    for rel in [
+        r"AttuneParser\AttuneParser_Data.lua",
+        r"AttuneParser\AttuneParser_Data2.lua",
+        r"AttuneParser\AttuneParser.lua",
+        r"AttuneParser\AttuneParser_UI.lua",
+        r"AttuneParser\AttuneParser_Integrations.lua",
+        r"TalorianTP\TalorianLootDB.lua",
+        r"TalorianTP\TalorianTP.lua",
+    ]:
+        p = resolve_addon_path(rel)
+        with open(p, "r", encoding="utf-8") as fh:
+            lua4.execute(fh.read())
+    res4 = lua4.execute(r'''
+    _G._FireEvent("ADDON_LOADED", "AttuneParser")
+    _G._FireEvent("ADDON_LOADED", "TalorianTP")
+    _G._FireEvent("PLAYER_LOGIN")
+    local function tick4()
+        for _, fr in ipairs(_G._FRAMES) do
+            if fr and fr:IsShown() and fr._scripts and fr._scripts.OnUpdate then fr._scripts.OnUpdate(fr, 0.05) end
+        end
+    end
+    local ui = TalorianTP:OpenUI(1)
+    tick4()
+    ui:Raise()
+    AttuneParser:OpenUI("top")
+    tick4()
+    assert(_G.AttuneParserFrame and (_G.AttuneParserFrame._raisedAt or 0) > (ui._raisedAt or 0),
+        "Full integrated: AttuneParserFrame must raise above TalorianMainFrame!")
+    AttuneParser:OpenTalorianUI()
+    tick4()
+    assert((ui._raisedAt or 0) > (_G.AttuneParserFrame._raisedAt or 0),
+        "Full integrated: OpenTalorianUI must raise TalorianMainFrame above AttuneParserFrame!")
+    TalorianTP_ToggleAnalysisWindow()
+    tick4()
+    local af = _G.TalorianAnalysisFrame
+    assert(af and af:IsShown() and (af._raisedAt or 0) > (ui._raisedAt or 0),
+        "Full integrated: TalorianAnalysisFrame must raise above TalorianMainFrame!")
+    local allBtn
+    for _, sb in ipairs(af.statusBtns or {}) do if sb.id == "all" then allBtn = sb end end
+    assert(allBtn, "Expected 'all' filter button")
+    allBtn._scripts.OnClick(allBtn)
+    assert(af.itemRows[1] and af.itemRows[1]:IsShown() and af.itemRows[1].itemData and (af.itemRows[1].itemData.coreStats or 0) >= 0,
+        "Full integrated: Explorer must populate real AttuneParser ZoneItems for ICC!")
+    af.itemRows[1]._scripts.OnEnter(af.itemRows[1])
+    return "FULL_INTEGRATED_PASSED"
+    ''')
+    print("FULL INTEGRATED RESULT:", res4)
+    assert res4 == "FULL_INTEGRATED_PASSED"
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--talorian-dir", default=None)
@@ -2383,6 +2582,7 @@ if __name__ == "__main__":
         TALORIAN_DIR = args.talorian_dir
     if os.path.isfile(os.path.join(TALORIAN_DIR, "TalorianTP.lua")):
         run_tests()
+        run_real_full_integrated_tests()
     else:
         print("TalorianTP not found at", TALORIAN_DIR, "-> running standalone AttuneParser suites only")
         check_lua51_scopes(include_talorian=False)

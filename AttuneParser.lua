@@ -9,7 +9,7 @@
 local AP = _G.AttuneParser or {}
 _G.AttuneParser = AP
 
-AP.VERSION = "1.1.3"
+AP.VERSION = "1.1.4"
 AP.Data = AP.Data or {}
 
 -- User-confirmed server tier defaults (replaced live when ASMSG_ATTUNE_TIERS arrives)
@@ -512,14 +512,26 @@ do
         function AP:OpenTalorianUI()
             local b = AP._talorianBridge
             if b and type(b.OpenUI) == "function" then
-                return pcall(b.OpenUI)
+                local ok, r1, r2 = pcall(b.OpenUI)
+                if type(AP.RaiseFrameFront) == "function" then
+                    AP.RaiseFrameFront(rawget(_G, "TalorianMainFrame"))
+                end
+                return ok, r1, r2
             end
             local ttp = rawget(_G, "TalorianTP")
             if type(ttp) == "table" and type(ttp.OpenUI) == "function" then
-                return pcall(ttp.OpenUI, ttp)
+                local ok, r1 = pcall(ttp.OpenUI, ttp)
+                if type(AP.RaiseFrameFront) == "function" then
+                    AP.RaiseFrameFront(rawget(_G, "TalorianMainFrame"))
+                end
+                return ok, r1
             end
             if SlashCmdList and type(SlashCmdList["TALORIANTP"]) == "function" then
-                return pcall(SlashCmdList["TALORIANTP"], "show")
+                local ok = pcall(SlashCmdList["TALORIANTP"], "show")
+                if type(AP.RaiseFrameFront) == "function" then
+                    AP.RaiseFrameFront(rawget(_G, "TalorianMainFrame"))
+                end
+                return ok
             end
             return false
         end
@@ -528,6 +540,10 @@ do
             local fn = rawget(_G, "AttuneAtlas_Toggle")
             if type(fn) == "function" then
                 pcall(fn)
+                local af = rawget(_G, "AttuneAtlasFrame")
+                if af and af:IsShown() and type(AP.RaiseFrameFront) == "function" then
+                    AP.RaiseFrameFront(af)
+                end
                 return true
             end
             return false
