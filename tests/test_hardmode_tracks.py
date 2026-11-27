@@ -1362,23 +1362,64 @@ def run_tests():
     local macTxt = secBtn and secBtn.GetAttribute and secBtn:GetAttribute("macrotext") or ""
     assert(macTxt:find("/targetexact МойСпутник", 1, true), "SecureExecBtn macro must target renamed Talorian! got: " .. tostring(macTxt))
 
-    -- 17b: Target named "МойСпутник" gets recognized & marked (raid icon 3)
-    local _marks17 = {}
-    local _origUnitName = _G.UnitName
-    _G.UnitName = function(u) return (u == "target") and "МойСпутник" or _origUnitName(u) end
-    _G.UnitIsVisible = function() return true end
-    _G.GetRaidTargetIndex = function() return nil end
-    _G.SetRaidTarget = function(u, idx) _marks17[u] = idx end
-    _G.GetCompanionInfo = function(kind, idx)
-        if kind == "CRITTER" and idx == 1 then
-            return 500031, "МойСпутник", 91200, "Interface\\Icons\\Spell_Arcane_TeleportMoonglade", 1
+    -- 17b: Target named "МойСпутник" gets recognized & marked (raid icon 3), including genitive declension, npc token & freshly-summoned grace
+    do
+        local _marks17 = {}
+        local _origUnitName = _G.UnitName
+        local _origUnitExists = _G.UnitExists
+        local _origTipSetUnit = TalorianUnitScanTooltip and TalorianUnitScanTooltip.SetUnit
+        local _origTipNumLines = TalorianUnitScanTooltip and TalorianUnitScanTooltip.NumLines
+        _G.UnitExists = function(u)
+            if u == "npc" or u == "target" then return true end
+            return _origUnitExists(u)
         end
-        return nil
+        _G.UnitName = function(u)
+            if u == "player" then return "Саша" end
+            if u == "target" or u == "npc" then return "МойСпутник" end
+            return _origUnitName(u)
+        end
+        _G.UnitIsVisible = function() return nil end
+        _G.GetRaidTargetIndex = function() return nil end
+        _G.SetRaidTarget = function(u, idx) _marks17[u] = idx end
+        _G.GetCompanionInfo = function(kind, idx)
+            if kind == "CRITTER" and idx == 1 then
+                return 500031, "МойСпутник", 91200, "Interface\\Icons\\Spell_Arcane_TeleportMoonglade", 0
+            end
+            return nil
+        end
+        if TalorianUnitScanTooltip then
+            TalorianUnitScanTooltip.SetUnit = function(self)
+                self.lines = { "МойСпутник", "Спутник Саши" }
+                return true
+            end
+            TalorianUnitScanTooltip.NumLines = function() return 2 end
+        end
+        -- Freshly summoned grace (lastSummonTime recent -> isCurrent=0 allowed) + nil UnitIsVisible + Russian genitive + "npc" token!
+        _G._TIME = _G._TIME + 0.5
+        TalorianTP_SummonIfNeeded()
+        TalorianTP_CheckAndMark(false)
+        assert(_marks17.target == 3 and _marks17.npc == 3,
+            "Talorian target & npc must be marked with diamond (3)! t=" .. tostring(_marks17.target) .. " n=" .. tostring(_marks17.npc))
+        local _origGGO = _G.GetGossipOptions
+        _G.GetGossipOptions = function() return end
+        _marks17 = {}
+        _G._FireEvent("GOSSIP_SHOW")
+        _G.GetGossipOptions = _origGGO
+        assert(_marks17.npc == 3, "GOSSIP_SHOW must mark npc Talorian with diamond (3)!")
+        -- Verify SecureExecBtn macro starts with /cleartarget when not yet summoned
+        local secBtn2 = TalorianTP_EnsureSecureExecButton()
+        local mac2 = secBtn2 and secBtn2.GetAttribute and secBtn2:GetAttribute("macrotext") or ""
+        assert(mac2:find("/cleartarget", 1, true) and mac2:find("/targetexact МойСпутник", 1, true),
+            "Unsummoned SecureExecBtn macro must /cleartarget + target custom name! got=" .. tostring(mac2))
+        if TalorianUnitScanTooltip then
+            TalorianUnitScanTooltip.SetUnit = _origTipSetUnit
+            TalorianUnitScanTooltip.NumLines = _origTipNumLines
+        end
+        _G.UnitIsVisible = function() return true end
+        _G.UnitExists = _origUnitExists
+        _G.UnitName = _origUnitName
+        _G.GetCompanionInfo = _origComp
     end
-    TalorianTP_CheckAndMark(false)
-    assert(_marks17.target == 3, "Renamed Talorian target must be marked with triangle (3)!")
-    _G.UnitName = _origUnitName
-    _G.GetCompanionInfo = _origComp
 
     -- 17c: PrimeAH row badge shows [ЧС] on blacklisted item
     MOCK_ITEMS[61015] = { name="В ЧС на ауке", q=4, ilvl=251, loc="INVTYPE_CHEST", done=false }
