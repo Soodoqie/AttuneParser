@@ -2884,6 +2884,105 @@ def run_real_full_integrated_tests():
     _G.GetCursorPosition = _oGCP2
     _G.GetItemInfo, _G.GetContainerNumSlots, _G.GetContainerItemLink = _oGII3, _oGCS3, _oGCL3
 
+    -- Suite 21m: Target highlight (QNCWrapper) + 3D HUD (QNP/QNW) freeze/overflow hardening
+    local ui5 = TalorianTP:OpenUI(5)
+    assert(ui5 and ui5.serverPanel, "Tab 5 serverPanel must exist!")
+    TalorianTP_DB.serverCtrl.hudEnabled = false
+    TalorianTP_DB.serverCtrl.qncEnabled = false
+    TalorianTP.serverCtrl:UpdateHUDVisibility()
+    TalorianTP.serverCtrl:RefreshQNCHighlight()
+    -- Find HUD and QNC toggle buttons on Tab 5 column 3 and click both cleanly
+    local hudBtn, qncBtn
+    for _, fr in ipairs(_G._FRAMES) do
+        local txt = fr.txt and fr.txt.GetText and fr.txt:GetText()
+        if type(txt) == "string" then
+            if txt:find("Стрелка к цели:", 1, true) then hudBtn = fr end
+            if txt:find("Подсветка цели:", 1, true) then qncBtn = fr end
+        end
+    end
+    assert(hudBtn and qncBtn, "Tab 5 must expose hudToggleBtn and qncToggleBtn!")
+    -- Verify CountBits handles non-finite PrimePepe.sel during Tab 5 Refresh
+    _G.PrimePepe = { cur = 1, mask = 1, sel = 1.0/0.0, slots = 1 }
+    ui5.serverPanel:Refresh()
+    _G.PrimePepe = nil
+    hudBtn._scripts.OnClick(hudBtn, "LeftButton")
+    qncBtn._scripts.OnClick(qncBtn, "LeftButton")
+    assert(TalorianTP_DB.serverCtrl.hudEnabled == true and TalorianTP_DB.serverCtrl.qncEnabled == true,
+        "Clicking HUD + QNC buttons must enable both toggles!")
+    assert(hudBtn.txt:GetText():find("ВКЛ", 1, true) and qncBtn.txt:GetText():find("ВКЛ", 1, true),
+        "Both buttons must display ВКЛ after enabling!")
+
+    -- 1. QNCWrapper preserves exact arg count (no trailing nil) and multi-returns
+    local _prevMac = _G.IsMacClient
+    local _origArgCounts = {}
+    local _lastMergedQNC = nil
+    local _multiProbe
+    _multiProbe = function(key, ...)
+        _origArgCounts[key] = select("#", ...)
+        if key == "QNC" then
+            _lastMergedQNC = select(1, ...)
+            return 1
+        elseif key == "PVQ" then
+            return 1, 2, 3, 4, 5, 6, 7, 8
+        elseif key == "QNP" then
+            return 100.0, 200.0, 50.0, 1e18
+        elseif key == "QNW" then
+            return 0.0/0.0, 0.5, 1.0, 1
+        end
+        return 5
+    end
+    local scObj = TalorianTP.serverCtrl
+    _G.IsMacClient = function(key, ...)
+        return _multiProbe(key, ...)
+    end
+    scObj:EnsureQNCWrapper()
+    local r1, r2, r3, r4, r5, r6, r7, r8 = _G.IsMacClient("PVQ")
+    assert(_origArgCounts["PVQ"] == 0, "1-arg IsMacClient('PVQ') must forward 0 extra args, got=" .. tostring(_origArgCounts["PVQ"]))
+    assert(r1 == 1 and r8 == 8, "QNCWrapper must pass through all 8 return values!")
+
+    -- 2. Extreme/huge/NaN facing & QNW NaN must never hang UpdateHUDTick or crash SetPoint
+    tick4()
+    local origProbe = _multiProbe
+    _multiProbe = function(key, ...)
+        if key == "QNP" and select("#", ...) > 0 then
+            return 0.0/0.0, 1.0/0.0, 0.0
+        elseif key == "QNP" then
+            return 100.0, 200.0, 50.0, 1.0/0.0
+        end
+        return origProbe(key, ...)
+    end
+    scObj:UpdateHUDTick()
+
+    -- 3. 12-entry MergeQNC priority + deduplication + zero-GUID filtering + self-call safety
+    local ext12 = {}
+    for k = 1, 12 do ext12[k] = string.format("0xCAD000000000%04d:1,0,0", k) end
+    _G._TARGET_GUID = "0xF130001234000001"
+    _G._FOCUS_GUID = "0xF130005678000002"
+    scObj:RefreshQNCHighlight()
+    _G.IsMacClient("QNC", table.concat(ext12, ";"))
+    assert(type(_lastMergedQNC) == "string", "QNC wrapper must invoke underlying QNC!")
+    local qParts = { strsplit(";", _lastMergedQNC) }
+    assert(#qParts <= 12, "Merged QNC count must not exceed 12! got=" .. #qParts)
+    assert(_lastMergedQNC:find("0xF130001234000001", 1, true) and _lastMergedQNC:find("0xF130005678000002", 1, true),
+        "Merged QNC must prioritize target and focus GUIDs ahead of 12 external entries!")
+    _G._TARGET_GUID = "0x0000000000000000"
+    _G._FOCUS_EXISTS = false
+    scObj:RefreshQNCHighlight()
+    assert(not _lastMergedQNC:find("0x0000000000000000", 1, true), "All-zero GUID must be ignored in QNC!")
+
+    -- 4. Guard EnsureQNCWrapper against re-wrapping QNCWrapper itself
+    local _qncWrapRef = _G.IsMacClient
+    assert(scObj:EnsureQNCWrapper() == true and _G.IsMacClient == _qncWrapRef, "EnsureQNCWrapper must remain idempotent!")
+
+    -- Restore _prevMac and disable toggles cleanly
+    _G._TARGET_GUID = "0xF130001234000001"
+    _G._FOCUS_EXISTS = true
+    _G.IsMacClient = _prevMac
+    scObj:EnsureQNCWrapper()
+    qncBtn._scripts.OnClick(qncBtn, "LeftButton")
+    hudBtn._scripts.OnClick(hudBtn, "LeftButton")
+    assert(not TalorianTP_DB.serverCtrl.qncEnabled and not TalorianTP_DB.serverCtrl.hudEnabled)
+
     return "FULL_INTEGRATED_PASSED"
     ''')
     print("FULL INTEGRATED RESULT:", res4)
