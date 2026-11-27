@@ -1,0 +1,13 @@
+## Interface: 30300
+## Title: |cff38bdf8AttuneParser|r
+## Notes: Самодостаточный анализ поглощения, Топ инстов, Путеводитель и Аукцион (WoW Prime)
+## Author: Sodoesqai
+## Version: 1.1.0
+## OptionalDeps: AttuneAtlas, PrimeAuctionHouse, Blizzard_EncounterJournal, PrimeHub
+## SavedVariables: AttuneParserDB
+
+AttuneParser_Data.lua
+AttuneParser_Data2.lua
+AttuneParser.lua
+AttuneParser_UI.lua
+AttuneParser_Integrations.lua

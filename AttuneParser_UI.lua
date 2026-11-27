@@ -1,0 +1,2353 @@
+-- AttuneParser_UI.lua - Самодостаточный интерфейс AttuneParser в стиле WoW Prime,
+-- кнопка миникарты, интеграция с PrimeHub и окно настроек.
+local AP = rawget(_G, "AttuneParser")
+if not AP then return end
+
+---------------------------------------------------------------------------
+-- 1. Фирменный скин WoW Prime (AtlasTexture.blp + бронзовый fallback)
+---------------------------------------------------------------------------
+local PS = {}
+AP.Skin = PS
+
+do
+    local ATLAS_FILE = "Interface\\Peark\\AtlasTexture.blp"
+    local WHITE = "Interface\\Buttons\\WHITE8X8"
+    local CAP = 22
+    local ATLAS = {
+        WINDOW    = {    0,   0, 1366, 1024 },
+        CLOSE     = { 1385,  16, 1428,   59 },
+        BTN_GREEN = { 1382,  82, 1608,  129 },
+        BTN_DARK  = { 1382, 141, 1608,  190 },
+        BTN_RED   = { 1383, 347, 1650,  403 },
+        BTN_GRAY  = { 1385, 433, 1650,  487 },
+    }
+    local KIND_KEY = {
+        green = "BTN_GREEN",
+        dark  = "BTN_DARK",
+        red   = "BTN_RED",
+        gray  = "BTN_GRAY",
+        gold  = "BTN_DARK",
+    }
+    local FALLBACK_BG = {
+        green = { 0.10, 0.34, 0.14, 0.95, 0.25, 0.78, 0.34, 1 },
+        dark  = { 0.11, 0.10, 0.09, 0.95, 0.48, 0.40, 0.22, 0.9 },
+        red   = { 0.38, 0.11, 0.11, 0.95, 0.74, 0.26, 0.24, 1 },
+        gray  = { 0.15, 0.14, 0.13, 0.90, 0.35, 0.32, 0.28, 0.8 },
+        gold  = { 0.25, 0.19, 0.08, 0.96, 0.98, 0.80, 0.28, 1 },
+    }
+    local hasAtlas = nil
+    local function CheckAtlas()
+        if hasAtlas ~= nil then return hasAtlas end
+        local probe = UIParent:CreateTexture(nil, "BACKGROUND")
+        local ok = probe:SetTexture(ATLAS_FILE)
+        hasAtlas = (ok and probe:GetTexture() ~= nil) and true or false
+        probe:SetTexture(nil)
+        probe:Hide()
+        return hasAtlas
+    end
+    local function SetAtlasUV(tex, r, u0, u1)
+        local l, rt = r[1], r[3]
+        if u0 then
+            local span = rt - l
+            rt = l + span * (u1 or 1)
+            l = l + span * u0
+        end
+        tex:SetTexture(ATLAS_FILE)
+        tex:SetTexCoord(l / 2048, rt / 2048, r[2] / 1024, r[4] / 1024)
+    end
+    function PS.ApplyWindow(f)
+        if not f then return end
+        if CheckAtlas() then
+            f:SetBackdrop(nil)
+            if not f._psBg then
+                local bg = f:CreateTexture(nil, "BACKGROUND")
+                bg:SetAllPoints(f)
+                SetAtlasUV(bg, ATLAS.WINDOW)
+                f._psBg = bg
+            end
+        else
+            f:SetBackdrop({ bgFile = WHITE, edgeFile = WHITE, edgeSize = 2, insets = { left = 2, right = 2, top = 2, bottom = 2 } })
+            f:SetBackdropColor(0.09, 0.08, 0.07, 0.96)
+            f:SetBackdropBorderColor(0.62, 0.52, 0.30, 1)
+        end
+    end
+    function PS.StyleBox(f, aBg, goldBorder)
+        if not f then return end
+        f:SetBackdrop({ bgFile = WHITE, edgeFile = WHITE, edgeSize = 1 })
+        f:SetBackdropColor(0.03, 0.03, 0.03, aBg or 0.52)
+        if goldBorder then
+            f:SetBackdropBorderColor(0.92, 0.74, 0.28, 0.95)
+        else
+            f:SetBackdropBorderColor(0.50, 0.42, 0.24, 0.82)
+        end
+    end
+    function PS.StyleClose(btn, sz)
+        if not btn then return end
+        btn:SetSize(sz or 26, sz or 26)
+        if CheckAtlas() then
+            btn:SetBackdrop(nil)
+            for _, rg in ipairs({ btn:GetRegions() }) do
+                if rg.GetObjectType and rg:GetObjectType() == "FontString" then rg:Hide() end
+            end
+            if not btn._psTex then
+                local t = btn:CreateTexture(nil, "ARTWORK")
+                t:SetAllPoints(btn)
+                SetAtlasUV(t, ATLAS.CLOSE)
+                btn._psTex = t
+                local hl = btn:CreateTexture(nil, "HIGHLIGHT")
+                hl:SetAllPoints(btn)
+                hl:SetBlendMode("ADD")
+                hl:SetAlpha(0.45)
+                SetAtlasUV(hl, ATLAS.CLOSE)
+                btn:SetHighlightTexture(hl)
+                btn:HookScript("OnMouseDown", function(self) self._psTex:SetVertexColor(0.75, 0.75, 0.75) end)
+                btn:HookScript("OnMouseUp", function(self) self._psTex:SetVertexColor(1, 1, 1) end)
+            end
+        else
+            btn:SetBackdrop({ bgFile = WHITE, edgeFile = WHITE, edgeSize = 1 })
+            btn:SetBackdropColor(0.38, 0.11, 0.11, 0.95)
+            btn:SetBackdropBorderColor(0.65, 0.48, 0.22, 1)
+        end
+    end
+    function PS.PaintBtn(b, kind, tint)
+        if not b then return end
+        kind = kind or b._psKind or "dark"
+        b._psKind = kind
+        if b._psSlices then
+            local r = ATLAS[KIND_KEY[kind] or "BTN_DARK"]
+            local u = CAP / (r[3] - r[1])
+            SetAtlasUV(b._psSlices[1], r, 0, u)
+            SetAtlasUV(b._psSlices[2], r, u, 1 - u)
+            SetAtlasUV(b._psSlices[3], r, 1 - u, 1)
+            for i = 1, 3 do
+                if tint then
+                    b._psSlices[i]:SetVertexColor(tint[1], tint[2], tint[3])
+                else
+                    b._psSlices[i]:SetVertexColor(1, 1, 1)
+                end
+            end
+            if b._psGoldRing then
+                if kind == "gold" then b._psGoldRing:Show() else b._psGoldRing:Hide() end
+            end
+        else
+            local fb = FALLBACK_BG[kind] or FALLBACK_BG.dark
+            b:SetBackdropColor(fb[1], fb[2], fb[3], fb[4])
+            b:SetBackdropBorderColor(fb[5], fb[6], fb[7], fb[8])
+        end
+    end
+    function PS.StyleBtn(b, kind)
+        if not b then return end
+        if CheckAtlas() then
+            b:SetBackdrop(nil)
+            local r = ATLAS[KIND_KEY[kind or "dark"] or "BTN_DARK"]
+            local h = b:GetHeight()
+            if not h or h < 1 then h = 24 end
+            local cap = math.floor(CAP * h / (r[4] - r[2]) + 0.5)
+            if cap < 4 then cap = 4 end
+            if not b._psSlices then
+                local sl = {}
+                for i = 1, 3 do sl[i] = b:CreateTexture(nil, "BACKGROUND") end
+                sl[1]:SetPoint("TOPLEFT", b, "TOPLEFT", 0, 0)
+                sl[1]:SetPoint("BOTTOMLEFT", b, "BOTTOMLEFT", 0, 0)
+                sl[1]:SetWidth(cap)
+                sl[3]:SetPoint("TOPRIGHT", b, "TOPRIGHT", 0, 0)
+                sl[3]:SetPoint("BOTTOMRIGHT", b, "BOTTOMRIGHT", 0, 0)
+                sl[3]:SetWidth(cap)
+                sl[2]:SetPoint("TOPLEFT", sl[1], "TOPRIGHT", 0, 0)
+                sl[2]:SetPoint("BOTTOMRIGHT", sl[3], "BOTTOMLEFT", 0, 0)
+                b._psSlices = sl
+
+                local gr = CreateFrame("Frame", nil, b)
+                gr:SetAllPoints(b)
+                gr:SetBackdrop({ edgeFile = WHITE, edgeSize = 1 })
+                gr:SetBackdropBorderColor(1.00, 0.82, 0.30, 0.95)
+                gr:Hide()
+                b._psGoldRing = gr
+
+                local hl = b:CreateTexture(nil, "HIGHLIGHT")
+                hl:SetPoint("TOPLEFT", 1, -1)
+                hl:SetPoint("BOTTOMRIGHT", -1, 1)
+                hl:SetBlendMode("ADD")
+                hl:SetAlpha(0.28)
+                SetAtlasUV(hl, ATLAS.BTN_GREEN)
+                b:SetHighlightTexture(hl)
+            end
+        else
+            b:SetBackdrop({ bgFile = WHITE, edgeFile = WHITE, edgeSize = 1 })
+        end
+        PS.PaintBtn(b, kind or "dark")
+    end
+    function PS.MakeBtn(parent, w, h, text, kind, fontObj)
+        local b = CreateFrame("Button", nil, parent)
+        b:SetSize(w, h)
+        PS.StyleBtn(b, kind or "dark")
+        local fs = b:CreateFontString(nil, "OVERLAY", fontObj or "GameFontHighlightSmall")
+        fs:SetPoint("CENTER", 0, 0)
+        fs:SetText(text or "")
+        b.label = fs
+        return b
+    end
+    function PS.StyleScrollRow(r, isOdd)
+        PS.StyleBox(r, isOdd and 0.42 or 0.25, false)
+        r:SetBackdropBorderColor(0.32, 0.27, 0.16, 0.45)
+        local hl = r:CreateTexture(nil, "HIGHLIGHT")
+        hl:SetAllPoints(r)
+        hl:SetTexture(0.95, 0.78, 0.28, 0.16)
+        r:SetHighlightTexture(hl)
+    end
+    function PS.AttachScroll(parent, listHeight, rowH, visCount, onUpdateFn)
+        local sf = CreateFrame("Frame", nil, parent)
+        sf.offset = 0
+        sf.total = 0
+        sf.visCount = visCount
+        sf:EnableMouseWheel(true)
+
+        local bar = CreateFrame("Frame", nil, sf)
+        bar:SetWidth(12)
+        bar:SetPoint("TOPRIGHT", sf, "TOPRIGHT", 0, -2)
+        bar:SetPoint("BOTTOMRIGHT", sf, "BOTTOMRIGHT", 0, 2)
+        PS.StyleBox(bar, 0.65, false)
+
+        local up = CreateFrame("Button", nil, bar)
+        up:SetSize(12, 14)
+        up:SetPoint("TOP", bar, "TOP", 0, 0)
+        PS.StyleBtn(up, "dark")
+        local ufs = up:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        ufs:SetPoint("CENTER", 0, 1); ufs:SetText("^")
+
+        local dn = CreateFrame("Button", nil, bar)
+        dn:SetSize(12, 14)
+        dn:SetPoint("BOTTOM", bar, "BOTTOM", 0, 0)
+        PS.StyleBtn(dn, "dark")
+        local dfs = dn:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        dfs:SetPoint("CENTER", 0, 1); dfs:SetText("v")
+
+        local thumb = bar:CreateTexture(nil, "OVERLAY")
+        thumb:SetTexture(0.78, 0.62, 0.26, 0.85)
+        thumb:SetWidth(8)
+        thumb:SetHeight(24)
+        thumb:SetPoint("TOP", bar, "TOP", 0, -16)
+
+        local function clampAndRefresh(newOff)
+            local maxOff = math.max(0, (sf.total or 0) - visCount)
+            if newOff < 0 then newOff = 0 end
+            if newOff > maxOff then newOff = maxOff end
+            sf.offset = newOff
+            if maxOff <= 0 then
+                bar:Hide()
+            else
+                bar:Show()
+                local trackH = math.max(24, (bar:GetHeight() or listHeight) - 34)
+                local thumbH = math.max(18, math.floor(trackH * (visCount / math.max(1, sf.total))))
+                if thumbH > trackH then thumbH = trackH end
+                thumb:SetHeight(thumbH)
+                local travel = math.max(0, trackH - thumbH)
+                local yOff = (maxOff > 0) and math.floor(travel * (sf.offset / maxOff)) or 0
+                thumb:ClearAllPoints()
+                thumb:SetPoint("TOP", bar, "TOP", 0, -(17 + yOff))
+            end
+            if onUpdateFn then onUpdateFn(sf.offset) end
+        end
+
+        sf:SetScript("OnMouseWheel", function(_, delta)
+            local step = (delta > 0) and -2 or 2
+            clampAndRefresh((sf.offset or 0) + step)
+        end)
+        up:SetScript("OnClick", function() clampAndRefresh((sf.offset or 0) - 3) end)
+        dn:SetScript("OnClick", function() clampAndRefresh((sf.offset or 0) + 3) end)
+
+        function sf:SetTotal(totalCount, keepOffset)
+            sf.total = totalCount or 0
+            clampAndRefresh(keepOffset and (sf.offset or 0) or 0)
+        end
+        return sf
+    end
+end
+
+---------------------------------------------------------------------------
+-- 2. Общие помощники данных и качества
+---------------------------------------------------------------------------
+local UI_ROOT = {}
+AP._ui = UI_ROOT
+
+local function KeepAttuneMinimapInPrimeHub()
+    local db = rawget(_G, "PrimeHubDB")
+    if type(db) == "table" then
+        db.keep = db.keep or {}
+        db.keep["AttuneParserMinimapButton"] = true
+        local ph = rawget(_G, "PrimeHub")
+        if ph and ph.Shelf and type(ph.Shelf.Rescan) == "function" then pcall(ph.Shelf.Rescan) end
+    end
+end
+
+local QUAL_HEX = {
+    [0] = "|cff9d9d9d",
+    [1] = "|cffffffff",
+    [2] = "|cff1eff00",
+    [3] = "|cff0070dd",
+    [4] = "|cffa335ee",
+    [5] = "|cffff8000",
+}
+
+local ERA_LABELS = {
+    All = "Все",
+    WotLK = "WotLK",
+    TBC = "TBC",
+    Classic = "Classic",
+}
+local ERA_EXP = {
+    WotLK = 3,
+    TBC = 2,
+    Classic = 1,
+}
+
+local STAT_NAMES = {
+    [3] = "Ловкость", [4] = "Сила", [5] = "Интеллект", [6] = "Дух", [7] = "Выносл.",
+    [12] = "Защита", [13] = "Уклон.", [14] = "Парир.", [15] = "Блок щитом",
+    [31] = "Меткость", [32] = "Крит", [35] = "Устойч.", [36] = "Скорость",
+    [37] = "Мастерство", [38] = "Сила атаки", [44] = "РПБ", [45] = "Сила закл.",
+    [46] = "Мана/5с", [47] = "Проник. закл.", [48] = "Блок (рейтинг)",
+}
+
+local function FormatLocation(w)
+    if w == "petloot" then return "|cffff80ffКладбоша|r" end
+    if w == "itembank" then return "|cff60a5faИБ|r" end
+    if w == "guild" then return "|cff40ff80ГБ|r" end
+    if w == "bank" then return "|cff38bdf8Банк|r" end
+    if w == "equip" then return "|cffffd200Экип|r" end
+    return "|cffffffffСумка|r"
+end
+
+local function ShortItemLink(itemId, name, quality, sfx)
+    local qCol = QUAL_HEX[quality or 2] or "|cffffffff"
+    if not itemId then return qCol .. tostring(name or "?") .. "|r" end
+    return qCol .. tostring(name or ("Предмет #" .. itemId)) .. "|r"
+end
+
+local function AppendSourcesToTooltip(tt, itemId, maxLines)
+    local src = AP:GetItemSources(itemId)
+    if not src or not src.list or #src.list == 0 then
+        if src and src.hasServerSources == false then
+            tt:AddLine("|cff94a3b8Источники еще не запрошены с сервера...|r", 1, 1, 1)
+            AP:RequestItemSources(itemId, false)
+        end
+        return
+    end
+    tt:AddLine(" ")
+    tt:AddLine("|cffffd200Источники получения:|r", 1, 1, 1)
+    local shown = 0
+    for _, sc in ipairs(src.list) do
+        if shown >= (maxLines or 5) then
+            tt:AddLine(string.format("  |cff94a3b8... и еще %d источник(ов)|r", #src.list - shown), 1, 1, 1)
+            break
+        end
+        local sType = (AP.SOURCE_TYPES and AP.SOURCE_TYPES[sc.st]) or "?"
+        local zPart = (sc.zoneName and sc.zoneName ~= "") and (" (" .. sc.zoneName .. ")") or ""
+        local extra = ""
+        if sc.st == 4 then
+            local qStatus = sc.qDone and "|cff40ff40[Вып]|r " or "|cffffd200[Кв]|r "
+            local chStr = (sc.qlen and sc.qlen > 1) and string.format(" [цепочка %d]", sc.qlen) or ""
+            local gStr = (sc.giver and sc.giver ~= "") and (" - от: " .. sc.giver) or ""
+            tt:AddLine("  " .. qStatus .. (sc.name or ("Задание #" .. tostring(sc.smp))) .. chStr .. gStr .. zPart, 0.92, 0.90, 0.85, true)
+            if sc.chainNames and #sc.chainNames > 1 then
+                local chList = {}
+                for ci, cn in ipairs(sc.chainNames) do
+                    if ci <= 4 then table.insert(chList, cn) end
+                end
+                if #sc.chainNames > 4 then table.insert(chList, "...") end
+                tt:AddLine("    |cffb0a080Цепочка: " .. table.concat(chList, " -> ") .. "|r", 1, 1, 1, true)
+            end
+        else
+            if sc.chance and sc.chance > 0 then
+                extra = " (" .. AP.FormatChance(sc.chance) .. ")"
+            end
+            tt:AddLine("  |cffd8c8a8[" .. sType .. "]|r " .. ((sc.name and sc.name ~= "") and sc.name or "?") .. zPart .. extra, 0.92, 0.90, 0.85, true)
+        end
+        shown = shown + 1
+    end
+end
+
+---------------------------------------------------------------------------
+-- 3. Главное окно AttuneParser (4 вкладки: Топ инстов, Обзор и Дары, Сумки и Ковка, Настройки)
+---------------------------------------------------------------------------
+local mainFrame
+
+local function RefreshHeaderAndFooter()
+    if not mainFrame or not mainFrame:IsShown() then return end
+    local bi = AP.Data and AP.Data.BuildInfo or {}
+    local gift = AP:GetActiveDailyGift(false)
+    local ms = AP:GetMilestonesSummary()
+    local talLoaded, talTtpOn, talActive, talOff = false, true, AP:IsTalorianBridgeActive(), (AP:GetSetting("talorianMode") == "off")
+    if type(AP.GetTalorianStatus) == "function" then
+        talLoaded, talTtpOn, talActive, talOff = AP:GetTalorianStatus()
+    else
+        talLoaded = (AP._talorianBridge ~= nil) or (type(rawget(_G, "TalorianTP")) == "table")
+        talTtpOn = not (type(_G.TalorianTP_DB) == "table" and _G.TalorianTP_DB.enabled == false)
+    end
+    local talStr = talActive and "|cff40ff40Талориан: ВКЛ|r"
+        or (talOff and "|cff94a3b8Талориан: Выкл|r"
+        or ((talLoaded and not talTtpOn) and "|cffffd200Талориан: Выкл (/ttp)|r" or "|cff94a3b8Автономный режим|r"))
+
+    local gStr = gift.active and ("|cffa855f7" .. (gift.name or "Дар") .. "|r (" .. (gift.remText or "?") .. ")") or "|cff94a3b8Дар не активен|r"
+    mainFrame.subText:SetText(string.format("v%s | База: %d предм. | %s | %s", tostring(AP.VERSION), tonumber(bi.items) or 0, gStr, talStr))
+
+    if ms.claimable and ms.claimable > 0 then
+        mainFrame.claimBtn.label:SetText("Вехи (+" .. ms.claimable .. ")")
+        PS.PaintBtn(mainFrame.claimBtn, "green")
+    else
+        mainFrame.claimBtn.label:SetText("Вехи")
+        PS.PaintBtn(mainFrame.claimBtn, "dark")
+    end
+
+    if talActive or talLoaded then
+        mainFrame.talBtn:Show()
+    else
+        mainFrame.talBtn:Hide()
+    end
+
+    if rawget(_G, "AttuneAtlas_Toggle") then
+        PS.PaintBtn(mainFrame.atlasBtn, "dark")
+    else
+        PS.PaintBtn(mainFrame.atlasBtn, "gray")
+    end
+
+    for key, btn in pairs(mainFrame.tabBtns) do
+        PS.PaintBtn(btn, (mainFrame.activeTab == key) and "gold" or "dark")
+    end
+end
+
+local function CreateLocationDropdown(parentBox, anchorBtn, onSelectFn)
+    local pop = CreateFrame("Frame", nil, parentBox)
+    pop:SetSize(256, 236)
+    pop:SetPoint("TOPLEFT", anchorBtn, "BOTTOMLEFT", 0, -2)
+    pop:SetFrameStrata("DIALOG")
+    pop:EnableMouse(true)
+    pop:Hide()
+    PS.StyleBox(pop, 0.96, true)
+
+    local rows = {}
+    local entries = {}
+    local VIS = 10
+    local RH = 22
+    local sf
+    sf = PS.AttachScroll(pop, VIS * RH, RH, VIS, function(offArg)
+        local off = offArg or (sf and sf.offset) or 0
+        for i = 1, VIS do
+            local r = rows[i]
+            local ent = entries[off + i]
+            if ent then
+                r._ent = ent
+                r.txt:SetText(ent.label)
+                r:Show()
+            else
+                r._ent = nil
+                r:Hide()
+            end
+        end
+    end)
+    sf:SetPoint("TOPLEFT", pop, "TOPLEFT", 4, -6)
+    sf:SetPoint("BOTTOMRIGHT", pop, "BOTTOMRIGHT", -4, 6)
+
+    for i = 1, VIS do
+        local r = CreateFrame("Button", nil, sf)
+        r:SetHeight(RH - 1)
+        r:SetPoint("TOPLEFT", sf, "TOPLEFT", 0, -(i - 1) * RH)
+        r:SetPoint("TOPRIGHT", sf, "TOPRIGHT", -14, -(i - 1) * RH)
+        PS.StyleScrollRow(r, (i % 2) == 1)
+
+        r.txt = r:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        r.txt:SetPoint("LEFT", r, "LEFT", 6, 0)
+        r.txt:SetPoint("RIGHT", r, "RIGHT", -6, 0)
+        r.txt:SetHeight(16)
+        r.txt:SetJustifyH("LEFT")
+        if r.txt.SetWordWrap then r.txt:SetWordWrap(false) end
+
+        r:SetScript("OnClick", function(self)
+            local ent = self._ent
+            pop:Hide()
+            if ent and onSelectFn then onSelectFn(ent) end
+        end)
+        rows[i] = r
+    end
+
+    function pop:OpenEntries(newEntries)
+        entries = newEntries or {}
+        sf:SetTotal(#entries, false)
+        pop:Show()
+    end
+
+    return pop
+end
+
+-- Вкладка 1: Топ инстов / Без ур. (1-lvl)
+local function BuildTopTab(parent)
+    local box = CreateFrame("Frame", nil, parent)
+    box:SetAllPoints(parent)
+    box.rows = {}
+    box.data = {}
+    box.locMode = "ALL"
+    box.locZoneId = nil
+    box.locLabel = "Все"
+    box.searchQuery = ""
+    box.lastZones = {}
+
+    local filterBar = CreateFrame("Frame", nil, box)
+    filterBar:SetPoint("TOPLEFT", box, "TOPLEFT", 0, 0)
+    filterBar:SetPoint("TOPRIGHT", box, "TOPRIGHT", 0, 0)
+    filterBar:SetHeight(84)
+    PS.StyleBox(filterBar, 0.50, false)
+
+    -- Строка фильтров 1: Режимы + Обхват + Синхр.
+    local modeDefs = {
+        { key = "new", label = "Новые" },
+        { key = "forge", label = "Ковка 90%" },
+        { key = "wednesday", label = "Дар Среды: Ковка" },
+        { key = "noreq", label = "1-lvl (Без ур.)" },
+    }
+    local modeBtns = {}
+    local mx = 8
+    for _, md in ipairs(modeDefs) do
+        local w = (md.key == "wednesday") and 130 or ((md.key == "noreq") and 110 or 86)
+        local b = PS.MakeBtn(filterBar, w, 22, md.label, "dark")
+        b:SetPoint("TOPLEFT", filterBar, "TOPLEFT", mx, -6)
+        mx = mx + w + 5
+        b:SetScript("OnClick", function()
+            AP:SetSetting("topMode", md.key)
+            box.RefreshData()
+        end)
+        modeBtns[md.key] = b
+    end
+
+    local scopeBtn = PS.MakeBtn(filterBar, 108, 22, "Персонаж", "dark")
+    scopeBtn:SetPoint("TOPRIGHT", filterBar, "TOPRIGHT", -88, -6)
+    scopeBtn:SetScript("OnClick", function()
+        local cur = AP:GetSetting("scope")
+        AP:SetSetting("scope", (cur == "account") and "hero" or "account")
+        box.RefreshData()
+    end)
+
+    local syncBtn = PS.MakeBtn(filterBar, 76, 22, "Синхр.", "green")
+    syncBtn:SetPoint("TOPRIGHT", filterBar, "TOPRIGHT", -6, -6)
+    syncBtn:SetScript("OnClick", function()
+        AP:RequestServerSync(true)
+        if type(RequestRaidInfo) == "function" then pcall(RequestRaidInfo) end
+        AP.After(0.5, function() box.RefreshData() end, "ap_ui_sync")
+    end)
+
+    -- Строка фильтров 2: Тип + Эра + Без КД + Без тяж.кв + Сорт
+    local kindBtn = PS.MakeBtn(filterBar, 96, 20, "Тип: Все", "dark")
+    kindBtn:SetPoint("TOPLEFT", filterBar, "TOPLEFT", 8, -32)
+    kindBtn:SetScript("OnClick", function()
+        local c = AP:GetSetting("kindFilter")
+        local tm = AP:GetSetting("topMode")
+        local nxt
+        if tm == "noreq" then
+            nxt = (c == "All" and "Raid") or (c == "Raid" and "Dungeon") or (c == "Dungeon" and "World") or "All"
+        else
+            nxt = (c == "All" and "Raid") or (c == "Raid" and "Dungeon") or "All"
+        end
+        AP:SetSetting("kindFilter", nxt)
+        box.RefreshData()
+    end)
+
+    local eraBtn = PS.MakeBtn(filterBar, 96, 20, "Эра: Все", "dark")
+    eraBtn:SetPoint("LEFT", kindBtn, "RIGHT", 6, 0)
+    eraBtn:SetScript("OnClick", function()
+        local c = AP:GetSetting("eraFilter")
+        local nxt = (c == "All" and "WotLK") or (c == "WotLK" and "TBC") or (c == "TBC" and "Classic") or "All"
+        AP:SetSetting("eraFilter", nxt)
+        box.RefreshData()
+    end)
+
+    local cdBtn = PS.MakeBtn(filterBar, 82, 20, "Без КД", "dark")
+    cdBtn:SetPoint("LEFT", eraBtn, "RIGHT", 6, 0)
+    cdBtn:SetScript("OnClick", function()
+        AP:SetSetting("onlyUnlocked", not AP:GetSetting("onlyUnlocked"))
+        box.RefreshData()
+    end)
+
+    local hqBtn = PS.MakeBtn(filterBar, 110, 20, "Без тяж.кв", "dark")
+    hqBtn:SetPoint("LEFT", cdBtn, "RIGHT", 6, 0)
+    hqBtn:SetScript("OnClick", function()
+        AP:SetSetting("excludeHeavyQuests", not AP:GetSetting("excludeHeavyQuests"))
+        box.RefreshData()
+    end)
+
+    local sortBtn = PS.MakeBtn(filterBar, 128, 20, "Сорт: Рейтинг", "dark")
+    sortBtn:SetPoint("LEFT", hqBtn, "RIGHT", 6, 0)
+    sortBtn:SetScript("OnClick", function()
+        local c = AP:GetSetting("sortBy")
+        local nxt = (c == "default" and "count") or (c == "count" and "stats") or "default"
+        AP:SetSetting("sortBy", nxt)
+        box.RefreshData()
+    end)
+
+    -- Строка фильтров 3: Локация (выпадающий список) + Поиск + Сброс фильтров
+    local locBtn = PS.MakeBtn(filterBar, 240, 20, "Локация: Все", "dark")
+    locBtn:SetPoint("TOPLEFT", filterBar, "TOPLEFT", 8, -58)
+    locBtn.label:SetWidth(226)
+    if locBtn.label.SetWordWrap then locBtn.label:SetWordWrap(false) end
+    locBtn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+
+    local locMenu = CreateLocationDropdown(box, locBtn, function(ent)
+        box.locMode = ent.mode or "ALL"
+        box.locZoneId = ent.zoneId
+        box.locLabel = ent.shortLabel or "Все"
+        box.RefreshData()
+    end)
+    box._locMenu = locMenu
+
+    locBtn:SetScript("OnClick", function(_, mBtn)
+        if mBtn == "RightButton" then
+            locMenu:Hide()
+            box.locMode = "ALL"
+            box.locZoneId = nil
+            box.locLabel = "Все"
+            box.RefreshData()
+            return
+        end
+        if locMenu:IsShown() then
+            locMenu:Hide()
+            return
+        end
+        local items = {
+            { label = "|cffffffffВсе локации|r", shortLabel = "Все", mode = "ALL" },
+            { label = "|cff38bdf8Только инсты (Рейды и Данжи)|r", shortLabel = "Только инсты", mode = "INST" },
+            { label = "|cff40ff40Открытый мир / квесты|r", shortLabel = "Открытый мир", mode = "WORLD" },
+        }
+        for _, zEntry in ipairs(box.lastZones or {}) do
+            local col = zEntry.isInst and "|cffffd200" or "|cff98fb98"
+            table.insert(items, {
+                label = string.format("%s%s|r |cff94a3b8(%d)|r", col, zEntry.name, zEntry.count),
+                shortLabel = zEntry.name,
+                mode = "ZONE",
+                zoneId = zEntry.zoneId,
+            })
+        end
+        locMenu:OpenEntries(items)
+    end)
+
+    local searchWrap = CreateFrame("Frame", nil, filterBar)
+    searchWrap:SetPoint("LEFT", locBtn, "RIGHT", 6, 0)
+    searchWrap:SetSize(226, 20)
+    PS.StyleBox(searchWrap, 0.72, false)
+
+    local searchEdit = CreateFrame("EditBox", nil, searchWrap)
+    searchEdit:SetPoint("TOPLEFT", searchWrap, "TOPLEFT", 6, -2)
+    searchEdit:SetPoint("BOTTOMRIGHT", searchWrap, "BOTTOMRIGHT", -20, 2)
+    searchEdit:SetFontObject(GameFontHighlightSmall)
+    searchEdit:SetAutoFocus(false)
+    searchEdit:SetMaxLetters(48)
+
+    local searchPh = searchWrap:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    searchPh:SetPoint("LEFT", searchWrap, "LEFT", 6, 0)
+    searchPh:SetText("Поиск: предмет или локация...")
+
+    local searchClr = PS.MakeBtn(searchWrap, 18, 18, "x", "dark")
+    searchClr:SetPoint("RIGHT", searchWrap, "RIGHT", -1, 0)
+    searchClr:Hide()
+    searchClr:SetScript("OnClick", function()
+        searchEdit:SetText("")
+        searchEdit:ClearFocus()
+    end)
+
+    searchEdit:SetScript("OnTextChanged", function(self)
+        local t = (self:GetText() or ""):gsub("^%s+", ""):gsub("%s+$", "")
+        if t == "" then
+            searchPh:Show()
+            searchClr:Hide()
+        else
+            searchPh:Hide()
+            searchClr:Show()
+        end
+        if box.searchQuery ~= t then
+            box.searchQuery = t
+            AP.After(0.08, function() box.RefreshData() end, "ap_ui_search_deb")
+        end
+    end)
+    searchEdit:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
+    searchEdit:SetScript("OnEnterPressed", function(self) self:ClearFocus() end)
+
+    local resetBtn = PS.MakeBtn(filterBar, 134, 20, "Сбросить фильтры", "dark")
+    resetBtn:SetPoint("TOPRIGHT", filterBar, "TOPRIGHT", -6, -58)
+    resetBtn:SetScript("OnClick", function()
+        AP:SetSetting("kindFilter", "All")
+        AP:SetSetting("eraFilter", "All")
+        AP:SetSetting("onlyUnlocked", false)
+        box.locMode = "ALL"
+        box.locZoneId = nil
+        box.locLabel = "Все"
+        box.searchQuery = ""
+        searchEdit:SetText("")
+        locMenu:Hide()
+        box.RefreshData()
+    end)
+
+    local listBox = CreateFrame("Frame", nil, box)
+    listBox:SetPoint("TOPLEFT", filterBar, "BOTTOMLEFT", 0, -6)
+    listBox:SetPoint("BOTTOMRIGHT", box, "BOTTOMRIGHT", 0, 22)
+    PS.StyleBox(listBox, 0.36, false)
+
+    local statusFoot = box:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    statusFoot:SetPoint("BOTTOMLEFT", box, "BOTTOMLEFT", 4, 4)
+    statusFoot:SetPoint("BOTTOMRIGHT", box, "BOTTOMRIGHT", -4, 4)
+    statusFoot:SetJustifyH("LEFT")
+
+    local VIS = 11
+    local ROW_H = 30
+    local sf = PS.AttachScroll(listBox, VIS * ROW_H, ROW_H, VIS, function() box.RenderRows() end)
+    sf:SetPoint("TOPLEFT", listBox, "TOPLEFT", 4, -4)
+    sf:SetPoint("BOTTOMRIGHT", listBox, "BOTTOMRIGHT", -4, 4)
+
+    for i = 1, VIS do
+        local r = CreateFrame("Button", nil, sf)
+        r:SetHeight(ROW_H - 2)
+        r:SetPoint("TOPLEFT", sf, "TOPLEFT", 0, -(i - 1) * ROW_H)
+        r:SetPoint("TOPRIGHT", sf, "TOPRIGHT", -16, -(i - 1) * ROW_H)
+        r:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+        PS.StyleScrollRow(r, (i % 2) == 1)
+
+        r.idxTxt = r:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        r.idxTxt:SetPoint("LEFT", r, "LEFT", 6, 0)
+        r.idxTxt:SetSize(26, 16)
+        r.idxTxt:SetJustifyH("LEFT")
+        if r.idxTxt.SetWordWrap then r.idxTxt:SetWordWrap(false) end
+
+        r.nameTxt = r:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        r.nameTxt:SetPoint("LEFT", r.idxTxt, "RIGHT", 4, 0)
+        r.nameTxt:SetSize(214, 16)
+        r.nameTxt:SetJustifyH("LEFT")
+        if r.nameTxt.SetWordWrap then r.nameTxt:SetWordWrap(false) end
+
+        r.cntTxt = r:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        r.cntTxt:SetPoint("LEFT", r.nameTxt, "RIGHT", 4, 0)
+        r.cntTxt:SetSize(108, 16)
+        r.cntTxt:SetJustifyH("LEFT")
+        if r.cntTxt.SetWordWrap then r.cntTxt:SetWordWrap(false) end
+
+        r.statTxt = r:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        r.statTxt:SetPoint("LEFT", r.cntTxt, "RIGHT", 4, 0)
+        r.statTxt:SetSize(78, 16)
+        r.statTxt:SetJustifyH("RIGHT")
+        if r.statTxt.SetWordWrap then r.statTxt:SetWordWrap(false) end
+
+        r.tpBtn = PS.MakeBtn(r, 30, 20, "ТП", "green")
+        r.tpBtn:SetPoint("RIGHT", r, "RIGHT", -4, 0)
+        r.tpBtn:SetScript("OnClick", function(btn)
+            local d = btn:GetParent()._rowData
+            if d and d.kind == "zone" then
+                AP:SelectZoneInTalorian(d.zone.zoneId, d.zone.zoneName)
+                AP:OpenTalorianUI()
+            end
+        end)
+
+        r.ejBtn = PS.MakeBtn(r, 148, 20, "Открыть в Путеводителе", "dark")
+        r.ejBtn:SetPoint("RIGHT", r.tpBtn, "LEFT", -4, 0)
+        r.ejBtn:SetScript("OnClick", function(btn)
+            local d = btn:GetParent()._rowData
+            if not d then return end
+            if d.kind == "zone" and type(AP.OpenEncounterJournal) == "function" then
+                AP:OpenEncounterJournal(d.zone.zoneId or d.zone.zoneName)
+            elseif d.kind == "noreq" and d.item and d.item.isInstanceZone and type(AP.OpenEncounterJournal) == "function" then
+                local tz = d.item.resolvedZone or d.item.primaryZone
+                if tz and tz > 0 then
+                    AP:OpenEncounterJournal(tz, d.item.itemId, d.item.diffMask)
+                end
+            end
+        end)
+
+        r:SetScript("OnClick", function(self, mouseBtn)
+            local d = self._rowData
+            if not d then return end
+            if d.kind == "noreq" then
+                local it = d.item
+                if (IsShiftKeyDown() or IsControlKeyDown() or (IsModifiedClick and IsModifiedClick("CHATLINK"))) and it.itemId then
+                    AP:InsertItemLink(it.itemId, it.link or it.sfx, it.name, it.quality)
+                    return
+                end
+                local tz = it.resolvedZone or it.primaryZone
+                if it.isInstanceZone and tz and tz > 0 and type(AP.OpenEncounterJournal) == "function" then
+                    AP:OpenEncounterJournal(tz, it.itemId, it.diffMask)
+                end
+            elseif d.kind == "zone" then
+                if mouseBtn == "RightButton" and AP:IsTalorianBridgeActive() then
+                    AP:SelectZoneInTalorian(d.zone.zoneId, d.zone.zoneName)
+                elseif type(AP.OpenEncounterJournal) == "function" then
+                    AP:OpenEncounterJournal(d.zone.zoneId or d.zone.zoneName)
+                end
+            end
+        end)
+
+        r:SetScript("OnEnter", function(self)
+            local d = self._rowData
+            if not d then return end
+            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+            if d.kind == "zone" then
+                local z = d.zone
+                local zCol = z.isRaid and "|cffff8000" or "|cff38bdf8"
+                GameTooltip:SetText(zCol .. (z.zoneName or "?") .. "|r")
+                GameTooltip:AddLine(string.format("%s | id:%s | %s",
+                    z.isRaid and "Рейд" or "Подземелье",
+                    tostring(z.zoneId or "?"),
+                    z.isLocked and "|cffff5050Есть КД|r" or "|cff40ff40Свободно (без КД)|r"
+                ), 0.9, 0.9, 0.9)
+                GameTooltip:AddLine(" ")
+                GameTooltip:AddLine(string.format("Новых вещей: |cff40ff40%d|r (сразу +%d, макс +%d стат)",
+                    z.newCount or 0, z.newImmediateStats or 0, z.newMaxStats or 0), 1, 1, 1)
+                GameTooltip:AddLine(string.format("До Титана 90%% (Ковка): |cffffd200%d|r (ост. +%d стат)",
+                    z.forgeCount or 0, z.forgeRemainStats or 0), 1, 1, 1)
+                local fb = z.forgeByTier or {}
+                if (fb[0] or 0) + (fb[1] or 0) + (fb[2] or 0) > 0 then
+                    GameTooltip:AddLine(string.format("  Разбивка ковки: Погл(20%%)=%d, Эп(35%%)=%d, Лег(60%%)=%d",
+                        fb[0] or 0, fb[1] or 0, fb[2] or 0), 0.85, 0.82, 0.72)
+                end
+                if z.byDiff and type(z.byDiff) == "table" then
+                    local hasDiff = false
+                    local maxD = z.maxDiffs or 4
+                    local dNames4 = { [1] = "10 об", [2] = "25 об", [3] = "10 гер", [4] = "25 гер" }
+                    local dNames2R = { [1] = "10 об", [2] = "25 об" }
+                    local dNames2D = { [1] = "Обыч.", [2] = "Героич." }
+                    for dId, df in pairs(z.byDiff) do
+                        if (df.newCount or 0) + (df.forgeCount or 0) > 0 then
+                            if not hasDiff then
+                                GameTooltip:AddLine(" ")
+                                GameTooltip:AddLine("|cffffd200По сложностям:|r", 1, 1, 1)
+                                hasDiff = true
+                            end
+                            local dLbl = (maxD == 4 and dNames4[dId]) or (z.isRaid and dNames2R[dId]) or dNames2D[dId] or ("Сложн." .. tostring(dId))
+                            GameTooltip:AddLine(string.format("  %s: нов=%d, ковка=%d, +стат=%d",
+                                dLbl, df.newCount or 0, df.forgeCount or 0, df.remainStats or 0), 0.85, 0.85, 0.85)
+                        end
+                    end
+                end
+                if d.ownedCount and d.ownedCount > 0 then
+                    GameTooltip:AddLine(" ")
+                    GameTooltip:AddLine("|cff40ff40Уже есть у вас (сумки/Кладбоша/банк): " .. d.ownedCount .. " шт.|r", 1, 1, 1)
+                    for oi = 1, math.min(4, #d.ownedList) do
+                        local oit = d.ownedList[oi]
+                        GameTooltip:AddLine("  [" .. FormatLocation(oit.where) .. "] " .. ShortItemLink(oit.itemId, oit.name, oit.quality) .. " (+" .. (oit.gainNowStats or 0) .. " стат)", 1, 1, 1)
+                    end
+                end
+                GameTooltip:AddLine(" ")
+                local hint = "|cff94a3b8ЛКМ: Открыть в Путеводителе"
+                if AP:IsTalorianBridgeActive() then
+                    hint = hint .. " | ПКМ / ТП: Выбрать в Талориане"
+                end
+                GameTooltip:AddLine(hint .. "|r", 1, 1, 1)
+            elseif d.kind == "noreq" then
+                local it = d.item
+                local tz = it.resolvedZone or it.primaryZone
+                local isInst = it.isInstanceZone == true
+                AP:BuildItemTooltip(GameTooltip, it.itemId, {
+                    sfx = it.sfx,
+                    link = it.link,
+                    name = it.name,
+                    quality = it.quality,
+                    zoneId = tz,
+                    diffMask = it.diffMask,
+                    maxSources = 6,
+                    hint = isInst
+                        and "|cff94a3b8Shift+ЛКМ: ссылка в чат | Ctrl+ЛКМ: примерить | ЛКМ: Открыть в Путеводителе|r"
+                        or "|cff94a3b8Shift+ЛКМ: ссылка в чат | Ctrl+ЛКМ: примерить|r",
+                })
+            end
+            GameTooltip:Show()
+        end)
+        r:SetScript("OnLeave", function() GameTooltip:Hide() end)
+
+        box.rows[i] = r
+    end
+
+    function box.RenderRows()
+        local off = sf.offset or 0
+        local talActive = AP:IsTalorianBridgeActive()
+        local topMode = AP:GetSetting("topMode")
+        for i = 1, VIS do
+            local r = box.rows[i]
+            local d = box.data[off + i]
+            if not d then
+                r._rowData = nil
+                r:Hide()
+            else
+                r._rowData = d
+                r:Show()
+                r.idxTxt:SetText(string.format("|cffb0a080#%d|r", off + i))
+                if d.kind == "zone" then
+                    local z = d.zone
+                    local kindTag = z.isRaid and "|cffff8000[Р]|r " or "|cff38bdf8[П]|r "
+                    local cdTag = z.isLocked and " |cffff5050[КД]|r" or ""
+                    local ownTag = (d.ownedCount and d.ownedCount > 0) and (" |cff40ff40[+" .. d.ownedCount .. "]|r") or ""
+                    r.nameTxt:SetText(kindTag .. (z.zoneName or "?") .. cdTag .. ownTag)
+                    if topMode == "forge" or topMode == "wednesday" then
+                        local fb = z.forgeByTier or {}
+                        r.cntTxt:SetText(string.format("Ков:%d(%d/%d/%d) Н:%d",
+                            z.forgeCount or 0, fb[0] or 0, fb[1] or 0, fb[2] or 0, z.newCount or 0))
+                        r.statTxt:SetText("|cffffd200+" .. (z.forgeRemainStats or 0) .. "|r")
+                    else
+                        r.cntTxt:SetText(string.format("|cff40ff40Н:%d|r |cffffd200К:%d|r |cff94a3b81у:%d|r",
+                            z.newCount or 0, z.forgeCount or 0, z.noReqCount or 0))
+                        r.statTxt:SetText("|cff40ff40+" .. (z.newMaxStats or 0) .. "|r")
+                    end
+                    r.ejBtn:Show()
+                    if talActive then
+                        r.nameTxt:SetWidth(186)
+                        r.cntTxt:SetWidth(104)
+                        r.statTxt:SetWidth(74)
+                        r.tpBtn:Show()
+                        r.ejBtn:ClearAllPoints()
+                        r.ejBtn:SetPoint("RIGHT", r.tpBtn, "LEFT", -4, 0)
+                    else
+                        r.nameTxt:SetWidth(214)
+                        r.cntTxt:SetWidth(108)
+                        r.statTxt:SetWidth(78)
+                        r.tpBtn:Hide()
+                        r.ejBtn:ClearAllPoints()
+                        r.ejBtn:SetPoint("RIGHT", r, "RIGHT", -4, 0)
+                    end
+                elseif d.kind == "noreq" then
+                    local it = d.item
+                    local stateTag = it.isNew and "|cff40ff40[Нов]|r" or ("|cffffd200[" .. (it.curPct or 0) .. "%]|r")
+                    local tz = it.resolvedZone or it.primaryZone
+                    local dTag = (it.isInstanceZone and AP.GetItemDiffTag and tz) and AP:GetItemDiffTag(it.itemId, tz, it.diffMask, false) or ""
+                    local dStr = (dTag ~= "") and ("|cff94a3b8[" .. dTag .. "]|r ") or " "
+                    r.nameTxt:SetText(stateTag .. dStr .. ShortItemLink(it.itemId, it.name, it.quality))
+                    r.cntTxt:SetText(string.format("ilvl %d | ур.%d", it.ilvl or 0, it.reqLvl or 0))
+                    r.statTxt:SetText("|cff40ff40+" .. (it.totalRemainStats or 0) .. " стат|r")
+                    r.nameTxt:SetWidth(214)
+                    r.cntTxt:SetWidth(108)
+                    r.statTxt:SetWidth(78)
+                    r.tpBtn:Hide()
+                    if it.isInstanceZone and tz and tz > 0 then
+                        r.ejBtn:Show()
+                        r.ejBtn:ClearAllPoints()
+                        r.ejBtn:SetPoint("RIGHT", r, "RIGHT", -4, 0)
+                    else
+                        r.ejBtn:Hide()
+                    end
+                end
+            end
+        end
+    end
+
+    function box.RefreshData()
+        local topMode = AP:GetSetting("topMode")
+        local scope = AP:GetSetting("scope")
+        local kindF = AP:GetSetting("kindFilter")
+        local eraF = AP:GetSetting("eraFilter")
+        local onlyUnl = AP:GetSetting("onlyUnlocked") == true
+        local exclHeavy = AP:GetSetting("excludeHeavyQuests") ~= false
+        local sortBy = AP:GetSetting("sortBy")
+
+        if topMode ~= "noreq" and kindF == "World" then
+            kindF = "All"
+        end
+
+        local gift = AP:GetActiveDailyGift(false)
+        if not AP._wedAutoApplied and AP:GetSetting("wedAuto") ~= false and gift.isWednesday then
+            AP._wedAutoApplied = true
+            if topMode == "new" then
+                topMode = "wednesday"
+                AP:EnsureSettings().topMode = "wednesday"
+            end
+        end
+
+        for key, b in pairs(modeBtns) do
+            if key == "wednesday" and gift.isWednesday and topMode ~= "wednesday" then
+                PS.PaintBtn(b, "green")
+            else
+                PS.PaintBtn(b, (topMode == key) and "gold" or "dark")
+            end
+        end
+        scopeBtn.label:SetText((scope == "account") and "Аккаунт" or "Персонаж")
+        PS.PaintBtn(scopeBtn, (scope == "account") and "gold" or "dark")
+
+        local kLabels = { All = "Все", Raid = "Рейды", Dungeon = "Данжи", World = "Мир/Кв" }
+        kindBtn.label:SetText("Тип: " .. (kLabels[kindF] or "Все"))
+        eraBtn.label:SetText("Эра: " .. (ERA_LABELS[eraF] or "Все"))
+        PS.PaintBtn(cdBtn, onlyUnl and "green" or "dark")
+        PS.PaintBtn(hqBtn, exclHeavy and "green" or "dark")
+        sortBtn.label:SetText("Сорт: " .. (sortBy == "count" and "Кол-во" or (sortBy == "stats" and "Статы" or "Рейтинг")))
+        locBtn.label:SetText("Локация: " .. tostring(box.locLabel or "Все"))
+        PS.PaintBtn(locBtn, (box.locMode ~= "ALL") and "gold" or "dark")
+
+        local rows = {}
+        local lockedMap = AP:GetLockedZonesMap()
+        local isRaidOpt = (kindF == "Raid" and true) or (kindF == "Dungeon" and false) or nil
+        local expOpt = ERA_EXP[eraF]
+        local searchQ = (box.searchQuery and box.searchQuery ~= "") and AP.Norm(box.searchQuery) or nil
+        local zoneCounts = {}
+
+        if topMode == "noreq" then
+            local nr = AP:GetNoReqLevelItems({
+                scope = scope,
+                exp = expOpt,
+                isRaid = isRaidOpt,
+                onlyWorld = (kindF == "World"),
+                lockedZones = lockedMap,
+                unlockedOnly = onlyUnl,
+                excludeHeavyQuests = exclHeavy,
+            })
+
+            local allItems = {}
+            for _, it in ipairs(nr.newItems or {}) do
+                it.totalRemainStats = it.maxStatsGain or math.floor((it.coreStatsSum or 0) * ((it.remainPct or 90) / 100) + 0.5)
+                table.insert(allItems, it)
+            end
+            for _, it in ipairs(nr.forgeItems or {}) do
+                it.totalRemainStats = math.floor((it.coreStatsSum or 0) * ((it.remainPct or 0) / 100) + 0.5)
+                table.insert(allItems, it)
+            end
+
+            for _, it in ipairs(allItems) do
+                local tz = it.resolvedZone or it.primaryZone
+                if tz and tz > 0 and it.zoneName then
+                    local zRec = zoneCounts[tz]
+                    if not zRec then
+                        zRec = { zoneId = tz, name = it.zoneName, isInst = it.isInstanceZone == true, count = 0 }
+                        zoneCounts[tz] = zRec
+                    end
+                    zRec.count = zRec.count + 1
+                end
+            end
+
+            for _, it in ipairs(allItems) do
+                local pass = true
+                local tz = it.resolvedZone or it.primaryZone
+                if box.locMode == "INST" and not it.isInstanceZone then
+                    pass = false
+                elseif box.locMode == "WORLD" and it.isInstanceZone then
+                    pass = false
+                elseif box.locMode == "ZONE" and box.locZoneId and tz ~= box.locZoneId then
+                    pass = false
+                end
+                if pass and searchQ and searchQ ~= "" then
+                    local ni = AP.Norm(it.name or "")
+                    local nz = AP.Norm(it.zoneName or "")
+                    if not (ni:find(searchQ, 1, true) or nz:find(searchQ, 1, true)) then
+                        pass = false
+                    end
+                end
+                if pass then
+                    table.insert(rows, { kind = "noreq", item = it })
+                end
+            end
+
+            if sortBy == "count" then
+                table.sort(rows, function(a, b)
+                    if (a.item.ilvl or 0) ~= (b.item.ilvl or 0) then return (a.item.ilvl or 0) > (b.item.ilvl or 0) end
+                    return (a.item.totalRemainStats or 0) > (b.item.totalRemainStats or 0)
+                end)
+            else
+                table.sort(rows, function(a, b)
+                    if (a.item.totalRemainStats or 0) ~= (b.item.totalRemainStats or 0) then
+                        return (a.item.totalRemainStats or 0) > (b.item.totalRemainStats or 0)
+                    end
+                    return (a.item.ilvl or 0) > (b.item.ilvl or 0)
+                end)
+            end
+            local fltNote = (eraF ~= "All" and (" | Эра: " .. eraF) or "")
+                .. (kindF ~= "All" and (" | Тип: " .. (kLabels[kindF] or kindF)) or "")
+                .. (box.locMode ~= "ALL" and (" | Лок: " .. tostring(box.locLabel or "")) or "")
+            statusFoot:SetText(string.format("|cffb0a080Без треб. ур. (req<=1):|r Показано: |cffffffff%d|r (из %d) | Завершено: %d%s",
+                #rows, #allItems, nr.completedCount or 0, fltNote))
+        else
+            local list = AP:GetRecommendations({
+                mode = topMode,
+                scope = scope,
+                onlyInstances = true,
+                isRaid = isRaidOpt,
+                exp = expOpt,
+                lockedZones = lockedMap,
+                unlockedOnly = onlyUnl,
+                excludeHeavyQuests = exclHeavy,
+                limit = 80,
+            })
+            if sortBy == "count" then
+                table.sort(list, function(a, b)
+                    local ca = (topMode == "forge" or topMode == "wednesday") and (a.forgeCount or 0) or ((a.newCount or 0) + (a.forgeCount or 0))
+                    local cb = (topMode == "forge" or topMode == "wednesday") and (b.forgeCount or 0) or ((b.newCount or 0) + (b.forgeCount or 0))
+                    if ca ~= cb then return ca > cb end
+                    return (a.totalRemainStats or 0) > (b.totalRemainStats or 0)
+                end)
+            elseif sortBy == "stats" then
+                table.sort(list, function(a, b)
+                    local sa = (topMode == "forge" or topMode == "wednesday") and (a.forgeRemainStats or 0) or (a.newMaxStats or 0)
+                    local sb = (topMode == "forge" or topMode == "wednesday") and (b.forgeRemainStats or 0) or (b.newMaxStats or 0)
+                    if sa ~= sb then return sa > sb end
+                    return (a.newCount or 0) > (b.newCount or 0)
+                end)
+            end
+            local owned = AP:GetOwnedUpgradeCandidates()
+            local ownedByZone = {}
+            for _, oit in ipairs(owned) do
+                if oit.primaryZone and oit.primaryZone > 0 then
+                    ownedByZone[oit.primaryZone] = ownedByZone[oit.primaryZone] or {}
+                    table.insert(ownedByZone[oit.primaryZone], oit)
+                end
+            end
+            for _, z in ipairs(list) do
+                if z.zoneId and z.zoneName then
+                    zoneCounts[z.zoneId] = {
+                        zoneId = z.zoneId,
+                        name = z.zoneName,
+                        isInst = true,
+                        count = (z.newCount or 0) + (z.forgeCount or 0),
+                    }
+                end
+                local pass = true
+                if box.locMode == "WORLD" then
+                    pass = false
+                elseif box.locMode == "ZONE" and box.locZoneId and z.zoneId ~= box.locZoneId then
+                    pass = false
+                end
+                if pass and searchQ and searchQ ~= "" then
+                    if not AP.Norm(z.zoneName or ""):find(searchQ, 1, true) then
+                        pass = false
+                    end
+                end
+                if pass then
+                    local ol = ownedByZone[z.zoneId]
+                    table.insert(rows, { kind = "zone", zone = z, ownedList = ol, ownedCount = ol and #ol or 0 })
+                end
+            end
+            local lockedCnt = 0
+            for _, r in ipairs(rows) do if r.zone.isLocked then lockedCnt = lockedCnt + 1 end end
+            statusFoot:SetText(string.format("|cffb0a080Найдено инстов: %d|r (с КД: %d) | ЛКМ: Путеводитель%s",
+                #rows, lockedCnt, AP:IsTalorianBridgeActive() and ", ТП: Талориан" or ""))
+        end
+
+        local sortedZones = {}
+        for _, ze in pairs(zoneCounts) do table.insert(sortedZones, ze) end
+        table.sort(sortedZones, function(a, b)
+            if a.count ~= b.count then return a.count > b.count end
+            return (a.name or "") < (b.name or "")
+        end)
+        box.lastZones = sortedZones
+
+        box.data = rows
+        sf:SetTotal(#rows, false)
+    end
+
+    box:SetScript("OnHide", function()
+        if locMenu then locMenu:Hide() end
+    end)
+
+    return box
+end
+
+-- Вкладка 2: Обзор и Дары
+local function BuildSummaryTab(parent)
+    local box = CreateFrame("Frame", nil, parent)
+    box:SetAllPoints(parent)
+
+    local function MakeCard(x, y, w, h, title)
+        local c = CreateFrame("Frame", nil, box)
+        c:SetPoint("TOPLEFT", box, "TOPLEFT", x, y)
+        c:SetSize(w, h)
+        PS.StyleBox(c, 0.50, false)
+        local hd = c:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        hd:SetPoint("TOPLEFT", c, "TOPLEFT", 10, -8)
+        hd:SetText("|cffffd200" .. title .. "|r")
+        c.body = c:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        c.body:SetPoint("TOPLEFT", c, "TOPLEFT", 10, -28)
+        c.body:SetPoint("BOTTOMRIGHT", c, "BOTTOMRIGHT", -10, 32)
+        c.body:SetJustifyH("LEFT")
+        c.body:SetJustifyV("TOP")
+        return c
+    end
+
+    local c1 = MakeCard(0, 0, 326, 200, "Каталог, Вехи и Талориан")
+    local c2 = MakeCard(334, 0, 326, 200, "Дар недели, Пыль и Опыт")
+    local c3 = MakeCard(0, -208, 326, 180, "Парагон, Спек и Автосвап")
+    local c4 = MakeCard(334, -208, 326, 180, "Суммарные статы поглощения")
+
+    local claimBtn2 = PS.MakeBtn(c1, 130, 22, "Забрать вехи", "green")
+    claimBtn2:SetPoint("BOTTOMLEFT", c1, "BOTTOMLEFT", 10, 6)
+    claimBtn2:SetScript("OnClick", function()
+        AP:ClaimAllMilestones()
+        AP.After(0.6, function() box.RefreshData() end, "ap_ui_claim2")
+    end)
+
+    local scanBtn = PS.MakeBtn(c1, 128, 22, "До-скан базы", "dark")
+    scanBtn:SetPoint("LEFT", claimBtn2, "RIGHT", 6, 0)
+    scanBtn:SetScript("OnClick", function()
+        AP:InvalidateCaches(false)
+        AP:StartBackgroundScan()
+        box.RefreshData()
+    end)
+
+    local syncBtn2 = PS.MakeBtn(c2, 126, 22, "Обновить данные", "dark")
+    syncBtn2:SetPoint("BOTTOMLEFT", c2, "BOTTOMLEFT", 10, 6)
+    syncBtn2:SetScript("OnClick", function()
+        AP:RequestServerSync(true)
+        AP.After(0.5, function() box.RefreshData() end, "ap_ui_sync2")
+    end)
+
+    local bagumBtn = PS.MakeBtn(c2, 174, 22, "Багум: обмен", "green")
+    bagumBtn:SetPoint("LEFT", syncBtn2, "RIGHT", 6, 0)
+    bagumBtn:Hide()
+    bagumBtn:SetScript("OnClick", function()
+        local st = AP:GetForgeMaterialStock()
+        if not (st.bagumOpen and st.bagumDustEnabled) then return end
+        if (st.legDirectToTit or 0) > 0 then
+            AP:ExchangeBagum(0, 6, 1)
+        elseif (st.epicToLeg or 0) > 0 then
+            AP:ExchangeBagum(0, 5, 1)
+        elseif (st.triToFrost or 0) > 0 then
+            AP:ExchangeBagum(0, 3, 1)
+        end
+    end)
+    bagumBtn:SetScript("OnEnter", function(self)
+        local st = AP:GetForgeMaterialStock()
+        GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        GameTooltip:SetText("|cffffd200Быстрый обмен у Багума|r")
+        GameTooltip:AddLine("ЛКМ: обменять 1 шт. (Пылающая->Астр., Мерц.->Пылающая или Триумф->Лед).", 0.9, 0.9, 0.9, true)
+        GameTooltip:AddLine(string.format("Курс пыли: %d:1 и %d:1 | Комиссия: %dg за крафт.", st.rate1 or 3, st.rate2 or 3, math.floor((st.bagumFeeCopper or 1000000) / 10000)), 0.85, 0.85, 0.85)
+        GameTooltip:Show()
+    end)
+    bagumBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+
+    local openTalBtn = PS.MakeBtn(c3, 146, 22, "Открыть Талориана", "green")
+    openTalBtn:SetPoint("BOTTOMLEFT", c3, "BOTTOMLEFT", 10, 6)
+    openTalBtn:SetScript("OnClick", function()
+        AP:OpenTalorianUI()
+    end)
+
+    local autoSwapBtn = PS.MakeBtn(c3, 150, 22, "Автопогл.: ?", "dark")
+    autoSwapBtn:SetPoint("BOTTOMRIGHT", c3, "BOTTOMRIGHT", -10, 6)
+    autoSwapBtn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+    autoSwapBtn:SetScript("OnClick", function(_, mBtn)
+        local as = AP:GetAutoSwapSummary()
+        if mBtn == "RightButton" then
+            AP:SetAutoAbsorbBoE(not (as.boeAllowed == true))
+        else
+            AP:SetAutoAbsorb(not (as.on == true))
+        end
+        AP.After(0.25, function() box.RefreshData() end, "ap_ui_as_c3")
+    end)
+    autoSwapBtn:SetScript("OnEnter", function(self)
+        local as = AP:GetAutoSwapSummary()
+        GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        GameTooltip:SetText("|cffffd200Серверное автопоглощение|r")
+        GameTooltip:AddLine("ЛКМ: вкл/выкл автоэкипировку для поглощения", 0.9, 0.9, 0.9)
+        GameTooltip:AddLine("ПКМ: вкл/выкл BoE вещи (" .. (as.boeAllowed and "|cff40ff40разрешены|r" or "|cffff8080нет|r") .. ")", 0.9, 0.9, 0.9)
+        GameTooltip:Show()
+    end)
+    autoSwapBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+
+    function box.RefreshData()
+        local cat = AP:GetAccountCatalogSummary()
+        local ms = AP:GetMilestonesSummary()
+        local active, done, tot = AP:GetScanProgress()
+        local hasPet, isSum = AP:HasTalorianPet()
+        local talLoaded, talTtpOn, talBridgeOn, talOff = false, true, AP:IsTalorianBridgeActive(), (AP:GetSetting("talorianMode") == "off")
+        if type(AP.GetTalorianStatus) == "function" then
+            talLoaded, talTtpOn, talBridgeOn, talOff = AP:GetTalorianStatus()
+        else
+            talLoaded = (AP._talorianBridge ~= nil) or (type(rawget(_G, "TalorianTP")) == "table")
+            talTtpOn = not (type(_G.TalorianTP_DB) == "table" and _G.TalorianTP_DB.enabled == false)
+        end
+        local petNote = isSum and " (призван)" or (hasPet and " (в списке петов)" or "")
+        local talTxt = talOff and "|cff94a3b8Отключен в настройках|r"
+            or (talBridgeOn and ("|cff40ff40Подключен|r" .. petNote))
+            or ((talLoaded and not talTtpOn) and ("|cffffd200Выключен в /ttp|r" .. petNote))
+            or (hasPet and "|cffffd200Питомец есть, TalorianTP не загружен|r" or "|cff94a3b8Спутник не найден - автономный режим|r")
+        local catLbl = cat.v2 and "Каталог класса" or "Каталог"
+
+        c1.body:SetText(string.format(
+            "%s: |cffffffff%d / %d|r (%d%%)\nАккаунт: |cff40ff40%d|r  |  Герой: |cff38bdf8%d|r\n\nВехи: поглощено |cffffffff%d|r\nДоступно наград: %s%d|r%s\n\nСкан WDB: %s (%d/%d)\nТалориан: %s",
+            catLbl, cat.doneBase or 0, cat.totalBase or 0, cat.pctBase or 0,
+            cat.acc or 0, cat.hero or 0,
+            ms.done or 0,
+            (ms.claimable or 0) > 0 and "|cff40ff40" or "|cff94a3b8", ms.claimable or 0,
+            ms.nextNeed and string.format("\nСлед. веха: %d (ост. %d)", ms.nextNeed, ms.nextRemain or 0) or "",
+            active and "идет" or "готов", done or 0, tot or 0,
+            talTxt
+        ))
+        if (ms.claimable or 0) > 0 then
+            PS.PaintBtn(claimBtn2, "green")
+        else
+            PS.PaintBtn(claimBtn2, "gray")
+        end
+
+        local g = AP:GetActiveDailyGift(false)
+        local st = AP:GetForgeMaterialStock()
+        local eq = AP:GetEquippedAttuneProgress()
+        local craftFeeG = math.floor((st.bagumTitCostCopper or 0) / 10000)
+        local rbNote = st.rbActive and string.format(" (Рес.б: %d/%d)", st.rbUsed or 0, st.rbMax or 0) or ""
+        local expElixStr = (g.hasExpElixir or eq.hasExpElixir) and "|cff40ff40ДА (x2)|r" or "|cff94a3b8нет|r"
+        local guildStr = (eq.guildKnown == false) and "?" or string.format("+%d%%", eq.guildPct or 0)
+        c2.body:SetText(string.format(
+            "Активный Дар: %s\n%s\nЭл. погл.: %s | Эл. опыта: %s\nМнож. погл.: |cff40ff40x%.2g|r (Ги %s)\nПыль (Багум %d:1 / %d:1)%s:\n  Мерц: |cffa335ee%d|r -> +%d Пыл | Пыл: |cffff8000%d|r -> +%d Астр\n  Астральная: |cff38bdf8%d|r | Всего Титана: |cff40ff40%d|r (~%dg)\nТит. сундуки: %d | Лед: %d (Триумф->Лед: +%d)\nЭкип. до ковки: ~%d кв. (обычн) / %d (данж)",
+            g.active and ("|cffa855f7" .. (g.name or "Дар") .. "|r (" .. (g.remText or "?") .. ")") or "|cff94a3b8нет|r",
+            (g.desc and g.desc ~= "") and ("|cffb0a080" .. g.desc .. "|r") or "",
+            g.hasElixir and "|cff40ff40ДА|r" or "|cff94a3b8нет|r",
+            expElixStr,
+            eq.xpMult or 1, guildStr,
+            st.rate1 or 3, st.rate2 or 3, rbNote,
+            st.dustEpic or 0, st.epicToLeg or 0, st.dustLeg or 0, st.legToTit or 0,
+            st.dustTit or 0, st.totalTitPotential or 0, craftFeeG,
+            st.titanBoxes or 0, st.frostEmblem or 0, st.frostFromLowerEmblems or 0,
+            eq.questsToFinishAllNormal or 0, eq.questsToFinishAllDungeon or 0
+        ))
+        if st.bagumOpen and st.bagumDustEnabled and ((st.legDirectToTit or 0) > 0 or (st.epicToLeg or 0) > 0 or (st.triToFrost or 0) > 0) then
+            if (st.legDirectToTit or 0) > 0 then
+                bagumBtn.label:SetText("Багум: +1 Астр.")
+            elseif (st.epicToLeg or 0) > 0 then
+                bagumBtn.label:SetText("Багум: +1 Пылающ.")
+            else
+                bagumBtn.label:SetText("Багум: +1 Лед")
+            end
+            bagumBtn:Show()
+        else
+            bagumBtn:Hide()
+        end
+
+        local par = AP:GetParagonInfo()
+        local sp = AP:GetPlayerSpecInfo()
+        local as = AP:GetAutoSwapSummary()
+        local dsp = (type(AP.GetDisperseSummary) == "function") and AP:GetDisperseSummary() or {}
+        local vt = (type(AP.GetMPlusVaultSummary) == "function") and AP:GetMPlusVaultSummary() or {}
+        local vStr = (vt.quick == 1) and "|cff40ff40Награда!|r" or ((vt.quick == 2) and "получено" or "ожидание")
+        c3.body:SetText(string.format(
+            "Парагон: |cffffd200ур. %d|r (%d / %d, %d%%) | 80 мир: %s\nСпек: |cff38bdf8%s|r%s\nАвтосвап: %s | BoE: %s\nАвтопродажа: %s | ЧС: |cffffd200%d|r\nРасщепл.: %d | Осколки: %d | Хран.M+: %s",
+            par.level or 0, par.curXP or 0, par.maxXP or 0, par.pct or 0,
+            par.worldLocked80 and "|cffff6060Огр.|r" or "|cff40ff40Нет|r",
+            sp.specName or "?", sp.isCustomLegion and " [Legion]" or "",
+            as.on == true and "|cff40ff40ВКЛ|r" or (as.on == false and "|cffff6060ВЫКЛ|r" or "|cff94a3b8?|r"),
+            as.boeAllowed == true and "|cff40ff40Да|r" or "|cff94a3b8Нет|r",
+            as.unlocked and (as.active and "|cff40ff40ВКЛ|r" or "|cffffd200Выкл|r") or "|cff94a3b8Замок|r",
+            as.blacklistCount or 0,
+            dsp.skill or 0, dsp.activeShards or 0, vStr
+        ))
+        autoSwapBtn.label:SetText("Автопогл.: " .. (as.on == true and "|cff40ff40ВКЛ|r" or "|cffff8080ВЫКЛ|r"))
+        PS.PaintBtn(autoSwapBtn, as.on == true and "green" or "dark")
+        if talBridgeOn or talLoaded then
+            openTalBtn:Show()
+        else
+            openTalBtn:Hide()
+        end
+
+        local acct = AP:GetAbsorbedAccountStats()
+        local lines = {}
+        local stTbl = acct.statsTotal or {}
+        for _, sid in ipairs(acct.statOrder or {}) do
+            local val = stTbl[sid]
+            if val and val > 0 then
+                local sNm = (acct.statNameFn and acct.statNameFn(sid)) or STAT_NAMES[sid] or ("Стат #" .. sid)
+                table.insert(lines, string.format("%s: |cff40ff40+%d|r", tostring(sNm), val))
+            end
+        end
+        if #lines == 0 then
+            c4.body:SetText("|cff94a3b8Статы еще не загружены с сервера.\nНажмите «Обновить данные».|r")
+        else
+            local out = {}
+            for i = 1, math.min(20, #lines), 2 do
+                local l1 = lines[i]
+                local l2 = lines[i + 1]
+                if l2 then
+                    table.insert(out, l1 .. "   |   " .. l2)
+                else
+                    table.insert(out, l1)
+                end
+            end
+            c4.body:SetText(table.concat(out, "\n"))
+        end
+    end
+
+    return box
+end
+
+-- Вкладка 3: Сумки и Ковка (сумки, банк, экип, Кладбоша, ГБ + ЧС)
+local function BuildBagsTab(parent)
+    local box = CreateFrame("Frame", nil, parent)
+    box:SetAllPoints(parent)
+    box.filterWhere = "all"
+    box.hideBlacklist = false
+    box.rows = {}
+    box.data = {}
+
+    local topBar = CreateFrame("Frame", nil, box)
+    topBar:SetPoint("TOPLEFT", box, "TOPLEFT", 0, 0)
+    topBar:SetPoint("TOPRIGHT", box, "TOPRIGHT", 0, 0)
+    topBar:SetHeight(32)
+    PS.StyleBox(topBar, 0.50, false)
+
+    local wBtns = {}
+    local filters = {
+        { key = "all", label = "Все", w = 48 },
+        { key = "bag", label = "Сумки", w = 54 },
+        { key = "petloot", label = "Кладбоша", w = 68 },
+        { key = "itembank", label = "ИБ", w = 38 },
+        { key = "equip", label = "Экип.", w = 50 },
+        { key = "bank", label = "Банк", w = 50 },
+        { key = "guild", label = "ГБ", w = 38 },
+    }
+    local wx = 6
+    for _, fl in ipairs(filters) do
+        local bw = fl.w
+        local b = PS.MakeBtn(topBar, bw, 22, fl.label, "dark")
+        b:SetPoint("LEFT", topBar, "LEFT", wx, 0)
+        wx = wx + bw + 4
+        b:SetScript("OnClick", function()
+            box.filterWhere = fl.key
+            if fl.key == "guild" then AP:SyncGuildBankForge()
+            elseif fl.key == "petloot" then AP:RequestPetLootState()
+            elseif fl.key == "itembank" and type(AP.RequestWhereItemsSync) == "function" then AP:RequestWhereItemsSync() end
+            box.RefreshData()
+        end)
+        wBtns[fl.key] = b
+    end
+
+    local blBtn = PS.MakeBtn(topBar, 88, 22, "Скрыть ЧС", "dark")
+    blBtn:SetPoint("LEFT", wx + 4, 0)
+    blBtn:SetScript("OnClick", function()
+        box.hideBlacklist = not box.hideBlacklist
+        box.RefreshData()
+    end)
+
+    local refBtn = PS.MakeBtn(topBar, 74, 22, "Обновить", "dark")
+    refBtn:SetPoint("RIGHT", topBar, "RIGHT", -6, 0)
+    refBtn:SetScript("OnClick", function()
+        AP:RequestPetLootState()
+        AP:SyncGuildBankForge()
+        if type(AP.RequestWhereItemsSync) == "function" then AP:RequestWhereItemsSync() end
+        box.RefreshData()
+    end)
+
+    local listBox = CreateFrame("Frame", nil, box)
+    listBox:SetPoint("TOPLEFT", topBar, "BOTTOMLEFT", 0, -6)
+    listBox:SetPoint("BOTTOMRIGHT", box, "BOTTOMRIGHT", 0, 52)
+    PS.StyleBox(listBox, 0.36, false)
+
+    local actBar = CreateFrame("Frame", nil, box)
+    actBar:SetPoint("TOPLEFT", listBox, "BOTTOMLEFT", 0, -4)
+    actBar:SetPoint("TOPRIGHT", listBox, "BOTTOMRIGHT", 0, -4)
+    actBar:SetHeight(26)
+
+    local sweepBtn = PS.MakeBtn(actBar, 116, 22, "Продать погл.", "dark")
+    sweepBtn:SetPoint("LEFT", actBar, "LEFT", 0, 0)
+    sweepBtn:SetScript("OnClick", function()
+        local as = AP:GetAutoSwapSummary()
+        if not as.unlocked then
+            DEFAULT_CHAT_FRAME:AddMessage("|cffffd200[AttuneParser]|r Автопродажа поглощенных не разблокирована на аккаунте.")
+            return
+        end
+        if StaticPopupDialogs and StaticPopup_Show then
+            StaticPopupDialogs["ATTUNEPARSER_SWEEP_NOW"] = {
+                text = "Продать СЕЙЧАС поглощенные предметы выбранного качества?\n(надетые + сумки; заблокированные замком ЧС не трогаются)",
+                button1 = YES or "Да",
+                button2 = NO or "Нет",
+                timeout = 0,
+                whileDead = 1,
+                hideOnEscape = 1,
+                OnAccept = function()
+                    AP:SweepAbsorbedNow(true)
+                end,
+            }
+            StaticPopup_Show("ATTUNEPARSER_SWEEP_NOW")
+        else
+            AP:SweepAbsorbedNow(true)
+        end
+    end)
+    sweepBtn:SetScript("OnEnter", function(self)
+        local as = AP:GetAutoSwapSummary()
+        GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        GameTooltip:SetText("|cffffd200Очистка поглощенных (ACMSG_AS_SWEEP)|r")
+        if as.unlocked then
+            GameTooltip:AddLine("ЛКМ: запросить подтверждение и продать поглощенные дубли по настройкам сервера (кроме вещей в ЧС).", 0.9, 0.9, 0.9, true)
+        else
+            GameTooltip:AddLine("Требует разблокировку автопродажи поглощенных на аккаунте.", 1, 0.5, 0.5, true)
+        end
+        GameTooltip:Show()
+    end)
+    sweepBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+
+    local junkBtn = PS.MakeBtn(actBar, 122, 22, "Расщеп. хлам", "dark")
+    junkBtn:SetPoint("LEFT", sweepBtn, "RIGHT", 5, 0)
+    junkBtn:SetScript("OnClick", function()
+        if AP.petLootJunk and AP.petLootJunk.running then
+            AP:StopPetLootJunk()
+        else
+            AP:ScanPetLootJunk(0)
+        end
+    end)
+    junkBtn:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        GameTooltip:SetText("|cffffd200Кладбоша: расщепить ненужное|r")
+        GameTooltip:AddLine("Сканирует хранилище Кладбоши (протокол 10 + Расщепление эссенций) и предлагает расщепить уже поглощенное/неподходящее.", 0.9, 0.9, 0.9, true)
+        GameTooltip:Show()
+    end)
+    junkBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+
+    local autoTabBtn = PS.MakeBtn(actBar, 106, 22, "Автопогл.: ?", "dark")
+    autoTabBtn:SetPoint("LEFT", junkBtn, "RIGHT", 5, 0)
+    autoTabBtn:SetScript("OnClick", function()
+        local as = AP:GetAutoSwapSummary()
+        AP:SetAutoAbsorb(not (as.on == true))
+        AP.After(0.25, function() box.RefreshData() end, "ap_ui_as_bags")
+    end)
+
+    local rbIbBtn = PS.MakeBtn(actBar, 92, 22, "БР / ИБ", "dark")
+    rbIbBtn:SetPoint("LEFT", autoTabBtn, "RIGHT", 5, 0)
+    rbIbBtn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+    rbIbBtn:SetScript("OnClick", function(_, mBtn)
+        if mBtn == "RightButton" then
+            if type(AP.OpenItemBank) == "function" then AP:OpenItemBank() end
+        else
+            if type(AP.DepositAllResources) == "function" then AP:DepositAllResources(0) end
+        end
+    end)
+
+    local ibAutoBtn = PS.MakeBtn(actBar, 100, 22, "ИБ-экип:ВЫКЛ", "dark")
+    ibAutoBtn:SetPoint("LEFT", rbIbBtn, "RIGHT", 5, 0)
+    ibAutoBtn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+    ibAutoBtn:SetScript("OnClick", function(_, mBtn)
+        if mBtn == "RightButton" then
+            if type(AP.RunItemBankAutoEquip) == "function" then
+                AP:RunItemBankAutoEquip(true)
+            end
+        else
+            if type(AP.SetItemBankAutoEquip) == "function" then
+                AP:SetItemBankAutoEquip(not (AP:GetSetting("ibAutoEquip") == true))
+            else
+                AP:SetSetting("ibAutoEquip", not (AP:GetSetting("ibAutoEquip") == true))
+            end
+        end
+        AP.After(0.2, function() box.RefreshData() end, "ap_ui_ib_auto")
+    end)
+    ibAutoBtn:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        GameTooltip:SetText("|cffffd200Автонадевание из Банка предметов|r")
+        GameTooltip:AddLine("ЛКМ: вкл/выкл автоэкип непоглощенных вещей из ИБ (работает и в бою, пауза 15с после ручного свапа).", 0.9, 0.9, 0.9, true)
+        GameTooltip:AddLine("ПКМ: надеть 1 подходящую вещь из ИБ прямо сейчас.", 0.4, 1.0, 0.4, true)
+        if type(AP.GetItemBankEquipSummary) == "function" then
+            local sum = AP:GetItemBankEquipSummary(true)
+            GameTooltip:AddLine(string.format("В ИБ: %d шт. | Подходящих сейчас: %d", sum.itemCount or 0, sum.eligibleCount or 0), 0.7, 0.85, 1.0, true)
+        end
+        GameTooltip:Show()
+    end)
+    ibAutoBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+
+    local ibPutBtn = PS.MakeBtn(actBar, 100, 22, "В ИБ: ВЫКЛ", "dark")
+    ibPutBtn:SetPoint("LEFT", ibAutoBtn, "RIGHT", 5, 0)
+    ibPutBtn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+    ibPutBtn:SetScript("OnClick", function(_, mBtn)
+        if mBtn == "RightButton" then
+            if type(AP.RunItemBankAutoPut) == "function" then
+                AP:RunItemBankAutoPut(true)
+            end
+        elseif IsShiftKeyDown and IsShiftKeyDown() and type(AP.CycleItemBankPutMode) == "function" then
+            AP:CycleItemBankPutMode()
+        else
+            if type(AP.SetItemBankAutoPut) == "function" then
+                AP:SetItemBankAutoPut(not (AP:GetSetting("ibAutoPut") == true))
+            else
+                AP:SetSetting("ibAutoPut", not (AP:GetSetting("ibAutoPut") == true))
+            end
+        end
+        AP.After(0.2, function() box.RefreshData() end, "ap_ui_ib_put")
+    end)
+    ibPutBtn:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        GameTooltip:SetText("|cffffd200Автосклад в Банк предметов (ACMSG_IB_PUT)|r")
+        GameTooltip:AddLine("ЛКМ: вкл/выкл автоперенос в ИБ (оставляет вещи до апгрейда ковки и вендора).", 0.9, 0.9, 0.9, true)
+        GameTooltip:AddLine("Shift+ЛКМ: сменить режим | ПКМ: положить 1 вещь сейчас.", 0.4, 1.0, 0.4, true)
+        if type(AP.GetItemBankPutSummary) == "function" then
+            local ps = AP:GetItemBankPutSummary(true)
+            GameTooltip:AddLine(string.format("Режим: %s | Готово к переносу: %d | В сумках для апгрейда: %d", tostring(ps.modeLabel or "?"), ps.eligibleCount or 0, ps.keptUpgrade or 0), 0.7, 0.85, 1.0, true)
+        end
+        GameTooltip:Show()
+    end)
+    ibPutBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    rbIbBtn:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        GameTooltip:SetText("|cffffd200Банк ресурсов и Банк предметов|r")
+        GameTooltip:AddLine("ЛКМ: сдать все ресурсы из сумок в Банк ресурсов (ACMSG_RB_DEPOSIT_ALL).", 0.9, 0.9, 0.9, true)
+        GameTooltip:AddLine("ПКМ: открыть окно Банка предметов (/ibank).", 0.9, 0.9, 0.9, true)
+        GameTooltip:Show()
+    end)
+    rbIbBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+
+    local foot = box:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    foot:SetPoint("BOTTOMLEFT", box, "BOTTOMLEFT", 4, 2)
+    foot:SetPoint("BOTTOMRIGHT", box, "BOTTOMRIGHT", -4, 2)
+    foot:SetJustifyH("LEFT")
+
+    local VIS = 12
+    local ROW_H = 29
+    local sf = PS.AttachScroll(listBox, VIS * ROW_H, ROW_H, VIS, function() box.RenderRows() end)
+    sf:SetPoint("TOPLEFT", listBox, "TOPLEFT", 4, -4)
+    sf:SetPoint("BOTTOMRIGHT", listBox, "BOTTOMRIGHT", -4, 4)
+
+    for i = 1, VIS do
+        local r = CreateFrame("Button", nil, sf)
+        r:SetHeight(ROW_H - 2)
+        r:SetPoint("TOPLEFT", sf, "TOPLEFT", 0, -(i - 1) * ROW_H)
+        r:SetPoint("TOPRIGHT", sf, "TOPRIGHT", -16, -(i - 1) * ROW_H)
+        r:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+        PS.StyleScrollRow(r, (i % 2) == 1)
+
+        r.locTxt = r:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        r.locTxt:SetPoint("LEFT", r, "LEFT", 6, 0)
+        r.locTxt:SetSize(72, 16)
+        r.locTxt:SetJustifyH("LEFT")
+        if r.locTxt.SetWordWrap then r.locTxt:SetWordWrap(false) end
+
+        r.nameTxt = r:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        r.nameTxt:SetPoint("LEFT", r.locTxt, "RIGHT", 4, 0)
+        r.nameTxt:SetSize(275, 16)
+        r.nameTxt:SetJustifyH("LEFT")
+        if r.nameTxt.SetWordWrap then r.nameTxt:SetWordWrap(false) end
+
+        r.tierTxt = r:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        r.tierTxt:SetPoint("LEFT", r.nameTxt, "RIGHT", 4, 0)
+        r.tierTxt:SetSize(155, 16)
+        r.tierTxt:SetJustifyH("LEFT")
+        if r.tierTxt.SetWordWrap then r.tierTxt:SetWordWrap(false) end
+
+        r.statTxt = r:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        r.statTxt:SetPoint("RIGHT", r, "RIGHT", -8, 0)
+        r.statTxt:SetSize(85, 16)
+        r.statTxt:SetJustifyH("RIGHT")
+        if r.statTxt.SetWordWrap then r.statTxt:SetWordWrap(false) end
+
+        r:SetScript("OnClick", function(self, mBtn)
+            local it = self._item
+            if not it then return end
+            if mBtn == "RightButton" then
+                if AP:ToggleItemBlacklist(it.itemId, it.instanceTier) then
+                    AP.After(0.25, function() box.RefreshData() end, "ap_ui_bl_ref")
+                end
+                return
+            end
+            if IsAltKeyDown and IsAltKeyDown() and it.where == "petloot" and it.dbId then
+                if AP:TakePetLootItem(it.dbId, it.count) then
+                    DEFAULT_CHAT_FRAME:AddMessage("|cff40ff40[AttuneParser]|r Запрошено забрать из Кладбоши: " .. tostring(it.name or it.itemId))
+                end
+                return
+            elseif IsAltKeyDown and IsAltKeyDown() and it.where == "itembank" and it.guid then
+                if type(AP.TakeItemBankItem) == "function" and AP:TakeItemBankItem(it.guid) then
+                    DEFAULT_CHAT_FRAME:AddMessage("|cff40ff40[AttuneParser]|r Запрошено забрать из Банка предметов: " .. tostring(it.name or it.itemId))
+                end
+                return
+            end
+            if IsControlKeyDown() and it.itemId and type(DressUpItemLink) == "function" then
+                local lnk = AP:GetItemHyperlink(it.itemId, it.link or it.sfx, it.name, it.quality)
+                if lnk then pcall(DressUpItemLink, lnk) end
+                return
+            end
+            if (IsShiftKeyDown() or (IsModifiedClick and IsModifiedClick("CHATLINK"))) and it.itemId then
+                AP:InsertItemLink(it.itemId, it.link or it.sfx, it.name, it.quality)
+            elseif it.primaryZone and it.primaryZone > 0 and AP:IsZoneInstance(it.primaryZone) and type(AP.OpenEncounterJournal) == "function" then
+                AP:OpenEncounterJournal(it.primaryZone, it.itemId, it.diffMask)
+            end
+        end)
+
+        r:SetScript("OnEnter", function(self)
+            local it = self._item
+            if not it then return end
+            local isInst = (it.primaryZone and it.primaryZone > 0 and AP:IsZoneInstance(it.primaryZone)) and true or false
+            local petHint = (it.where == "petloot" and it.dbId) and " | Alt+ЛКМ: забрать в сумку" or ((it.where == "itembank" and it.guid) and " | Alt+ЛКМ: забрать из ИБ" or "")
+            local blHint = " | ПКМ: вкл/выкл ЧС"
+            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+            AP:BuildItemTooltip(GameTooltip, it.itemId, {
+                sfx = it.sfx,
+                link = it.link,
+                name = it.name,
+                quality = it.quality,
+                tier = it.instanceTier,
+                zoneId = it.primaryZone,
+                extraLine = string.format("В наличии (%s): тир %s -> +%d%% (+%d стат сейчас)",
+                    FormatLocation(it.where), it.instanceTierName or "?", it.gainNowPct or 0, it.gainNowStats or 0),
+                hint = isInst
+                    and ("|cff94a3b8ЛКМ: Путеводитель | Shift+ЛКМ: в чат | Ctrl+ЛКМ: примерить" .. petHint .. blHint .. "|r")
+                    or ("|cff94a3b8Shift+ЛКМ: в чат | Ctrl+ЛКМ: примерить" .. petHint .. blHint .. "|r"),
+            })
+            GameTooltip:Show()
+        end)
+        r:SetScript("OnLeave", function() GameTooltip:Hide() end)
+
+        box.rows[i] = r
+    end
+
+    function box.RenderRows()
+        local off = sf.offset or 0
+        for i = 1, VIS do
+            local r = box.rows[i]
+            local it = box.data[off + i]
+            if not it then
+                r._item = nil
+                r:Hide()
+            else
+                r._item = it
+                r:Show()
+                r.locTxt:SetText("[" .. FormatLocation(it.where) .. "]")
+                local dTag = (AP.GetItemDiffTag and it.primaryZone) and AP:GetItemDiffTag(it.itemId, it.primaryZone, it.diffMask, false) or ""
+                local dStr = (dTag ~= "") and ("|cff94a3b8[" .. dTag .. "]|r ") or ""
+                local bl = it.isBlacklisted and " |cffff5050[ЧС]|r" or ""
+                r.nameTxt:SetText(dStr .. ShortItemLink(it.itemId, it.name, it.quality) .. bl)
+                r.tierTxt:SetText(string.format("%s -> |cff40ff40+%d%%|r", it.instanceTierName or "?", it.gainNowPct or 0))
+                r.statTxt:SetText("|cff40ff40+" .. (it.gainNowStats or 0) .. " стат|r")
+            end
+        end
+    end
+
+    function box.RefreshData()
+        for k, b in pairs(wBtns) do
+            PS.PaintBtn(b, (box.filterWhere == k) and "gold" or "dark")
+        end
+        PS.PaintBtn(blBtn, box.hideBlacklist and "green" or "dark")
+
+        local cands = AP:GetOwnedUpgradeCandidates()
+        local filtered = {}
+        local totGain, petCnt, blCnt = 0, 0, 0
+        for _, it in ipairs(cands) do
+            if it.where == "petloot" then petCnt = petCnt + 1 end
+            if it.isBlacklisted then blCnt = blCnt + 1 end
+            local wOk = (box.filterWhere == "all") or ((it.where or "bag") == box.filterWhere)
+            local bOk = (not box.hideBlacklist) or (not it.isBlacklisted)
+            if wOk and bOk then
+                table.insert(filtered, it)
+                totGain = totGain + (it.gainNowStats or 0)
+            end
+        end
+        box.data = filtered
+        sf:SetTotal(#filtered, false)
+        local as = AP:GetAutoSwapSummary()
+        PS.PaintBtn(sweepBtn, as.unlocked and "dark" or "gray")
+        sweepBtn.label:SetText(as.unlocked and "Продать поглощ." or "Продать (замок)")
+        local jRun = AP.petLootJunk and AP.petLootJunk.running
+        if jRun then
+            PS.PaintBtn(junkBtn, "red")
+            junkBtn.label:SetText(string.format("Стоп %d/%d", jRun[1] or 0, jRun[2] or 0))
+        elseif AP:CanPetLootJunk() then
+            PS.PaintBtn(junkBtn, "green")
+            junkBtn.label:SetText("Расщепить хлам")
+        else
+            PS.PaintBtn(junkBtn, "gray")
+            junkBtn.label:SetText("Расщепить хлам")
+        end
+        PS.PaintBtn(autoTabBtn, as.on == true and "green" or "dark")
+        autoTabBtn.label:SetText("Автопогл: " .. (as.on == true and "ВКЛ" or "ВЫКЛ"))
+        local ibOn = (AP:GetSetting("ibAutoEquip") == true)
+        PS.PaintBtn(ibAutoBtn, ibOn and "green" or "dark")
+        ibAutoBtn.label:SetText("ИБ-экип:" .. (ibOn and "ВКЛ" or "ВЫК"))
+        local putOn = (AP:GetSetting("ibAutoPut") == true)
+        PS.PaintBtn(ibPutBtn, putOn and "green" or "dark")
+        ibPutBtn.label:SetText("В ИБ: " .. (putOn and "ВКЛ" or "ВЫКЛ"))
+        foot:SetText(string.format("|cffb0a080Готово к поглощению: %d предм.|r (суммарно |cff40ff40+%d стат|r) | Кладбоша: %d | ЧС: %d",
+            #filtered, totGain, petCnt, blCnt))
+    end
+
+    return box
+end
+
+-- Вкладка 4: Настройки AttuneParser
+local function BuildSettingsTab(parent)
+    local box = CreateFrame("Frame", nil, parent)
+    box:SetAllPoints(parent)
+
+    local leftCard = CreateFrame("Frame", nil, box)
+    leftCard:SetPoint("TOPLEFT", box, "TOPLEFT", 0, 0)
+    leftCard:SetSize(326, 392)
+    PS.StyleBox(leftCard, 0.50, false)
+
+    local rightCard = CreateFrame("Frame", nil, box)
+    rightCard:SetPoint("TOPLEFT", leftCard, "TOPRIGHT", 8, 0)
+    rightCard:SetSize(326, 392)
+    PS.StyleBox(rightCard, 0.50, false)
+
+    local lHdr = leftCard:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    lHdr:SetPoint("TOPLEFT", 12, -10)
+    lHdr:SetText("|cffffd200Интерфейс и интеграции|r")
+
+    local rHdr = rightCard:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    rHdr:SetPoint("TOPLEFT", 12, -10)
+    rHdr:SetText("|cffffd200Расчеты, Скан и Питомец Талориан|r")
+
+    local updaters = {}
+    local function AddToggle(card, yOff, settingKey, label, tip)
+        local row = CreateFrame("Button", nil, card)
+        row:SetPoint("TOPLEFT", card, "TOPLEFT", 10, yOff)
+        row:SetSize(304, 24)
+        local chk = CreateFrame("Frame", nil, row)
+        chk:SetPoint("LEFT", row, "LEFT", 0, 0)
+        chk:SetSize(18, 18)
+        PS.StyleBox(chk, 0.70, false)
+        local mark = chk:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        mark:SetPoint("CENTER", 0, 1)
+        local txt = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        txt:SetPoint("LEFT", chk, "RIGHT", 8, 0)
+        txt:SetText(label)
+
+        row:SetScript("OnClick", function()
+            local cur = AP:GetSetting(settingKey) == true
+            AP:SetSetting(settingKey, not cur)
+            box.RefreshData()
+        end)
+        if tip then
+            row:SetScript("OnEnter", function(self)
+                GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+                GameTooltip:SetText(label)
+                GameTooltip:AddLine(tip, 0.9, 0.9, 0.9, true)
+                GameTooltip:Show()
+            end)
+            row:SetScript("OnLeave", function() GameTooltip:Hide() end)
+        end
+        table.insert(updaters, function()
+            local on = AP:GetSetting(settingKey) == true
+            if on then
+                mark:SetText("|cff40ff40V|r")
+                PS.StyleBox(chk, 0.75, true)
+            else
+                mark:SetText("")
+                PS.StyleBox(chk, 0.55, false)
+            end
+        end)
+        return row
+    end
+
+    AddToggle(leftCard, -36, "showMinimap", "Кнопка у миникарты", "Показывать или скрывать кнопку AttuneParser у миникарты (/ap minimap).")
+    AddToggle(leftCard, -64, "showPrimeHub", "Плитка в PrimeHub", "Регистрировать кнопку AttuneParser в серверном центре аддонов PrimeHub.")
+    AddToggle(leftCard, -92, "showAuctionUI", "Помощник на аукционе", "Показывать кнопку и панель фильтра поглощения на аукционе (PrimeAH и 3.3.5).")
+    AddToggle(leftCard, -120, "showEJOverlay", "Оверлей Путеводителя по приключениям", "Боковая панель прогресса инста, вещей в сумках и Дара среды в Путеводителе.")
+    AddToggle(leftCard, -148, "showEJBadges", "Значки поглощения на луте Путеводителя", "Показывать [+20%] / [Ков] / [90%] / [ЧС] прямо на строках дропа в Путеводителе.")
+    AddToggle(leftCard, -176, "tradeAlert", "Оповещение в чате при обмене (Trade)", "Выводить в чат сводку по поглощаемым/недокованным вещам в окне обмена.")
+
+    local ejSideBtn = PS.MakeBtn(leftCard, 298, 24, "Сторона оверлея Путеводителя: Справа", "dark")
+    ejSideBtn:SetPoint("TOPLEFT", leftCard, "TOPLEFT", 12, -214)
+    ejSideBtn:SetScript("OnClick", function()
+        local cur = AP:GetSetting("ejOverlaySide")
+        AP:SetSetting("ejOverlaySide", (cur == "LEFT") and "RIGHT" or "LEFT")
+        box.RefreshData()
+    end)
+
+    local resetMmBtn = PS.MakeBtn(leftCard, 144, 24, "Сброс миникарты", "dark")
+    resetMmBtn:SetPoint("TOPLEFT", leftCard, "TOPLEFT", 12, -248)
+    resetMmBtn:SetScript("OnClick", function()
+        KeepAttuneMinimapInPrimeHub()
+        AP:SetSetting("minimapAngle", 225)
+        AP:SetSetting("showMinimap", true)
+        box.RefreshData()
+    end)
+
+    local resetAucBtn = PS.MakeBtn(leftCard, 148, 24, "Сброс кнопки аука", "dark")
+    resetAucBtn:SetPoint("LEFT", resetMmBtn, "RIGHT", 6, 0)
+    resetAucBtn:SetScript("OnClick", function()
+        AP:ResetAuctionPos()
+        DEFAULT_CHAT_FRAME:AddMessage("|cff38bdf8[AttuneParser]|r Позиция кнопки аукциона сброшена.")
+    end)
+
+    AddToggle(rightCard, -36, "wedAuto", "Авто-режим «Дар Среды: Ковка»", "По средам при открытии Топа автоматически включать приоритет ковки до Титаника.")
+    AddToggle(rightCard, -64, "excludeHeavyQuests", "Исключать тяжелые квест-цепочки", "Скрывать труднодоступные квестовые награды из рекомендаций фарма инстов.")
+    AddToggle(rightCard, -92, "autoWarmStats", "Авто-прогрев базы предметов (WDB)", "После входа плавно до-загружать статы редких предметов в фоне без лагов.")
+
+    local talHdr = rightCard:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    talHdr:SetPoint("TOPLEFT", 12, -138)
+    talHdr:SetText("|cffffd200Взаимодействие с питомцем Талориан|r")
+
+    local talModeBtn = PS.MakeBtn(rightCard, 298, 26, "Режим Талориана: Авто", "dark")
+    talModeBtn:SetPoint("TOPLEFT", rightCard, "TOPLEFT", 12, -162)
+    talModeBtn:SetScript("OnClick", function()
+        local cur = AP:GetSetting("talorianMode")
+        AP:SetSetting("talorianMode", (cur == "off") and "auto" or "off")
+        box.RefreshData()
+    end)
+
+    local talInfo = rightCard:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    talInfo:SetPoint("TOPLEFT", rightCard, "TOPLEFT", 12, -198)
+    talInfo:SetPoint("RIGHT", rightCard, "RIGHT", -12, 0)
+    talInfo:SetJustifyH("LEFT")
+
+    local testTalBtn = PS.MakeBtn(rightCard, 180, 24, "Открыть окно Талориана", "green")
+    testTalBtn:SetPoint("TOPLEFT", rightCard, "TOPLEFT", 12, -264)
+    testTalBtn:SetScript("OnClick", function() AP:OpenTalorianUI() end)
+
+    local srvHdr = rightCard:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    srvHdr:SetPoint("TOPLEFT", 12, -296)
+    srvHdr:SetText("|cffffd200Серверное автопоглощение и продажа|r")
+
+    local srvAutoBtn = PS.MakeBtn(rightCard, 146, 22, "Автопогл.: ?", "dark")
+    srvAutoBtn:SetPoint("TOPLEFT", rightCard, "TOPLEFT", 12, -318)
+    srvAutoBtn:SetScript("OnClick", function()
+        local as = AP:GetAutoSwapSummary()
+        AP:SetAutoAbsorb(not (as.on == true))
+        AP.After(0.25, function() box.RefreshData() end, "ap_ui_srv_ref")
+    end)
+
+    local srvBoeBtn = PS.MakeBtn(rightCard, 146, 22, "BoE: ?", "dark")
+    srvBoeBtn:SetPoint("LEFT", srvAutoBtn, "RIGHT", 6, 0)
+    srvBoeBtn:SetScript("OnClick", function()
+        local as = AP:GetAutoSwapSummary()
+        AP:SetAutoAbsorbBoE(not (as.boeAllowed == true))
+        AP.After(0.25, function() box.RefreshData() end, "ap_ui_srv_ref")
+    end)
+
+    local srvSellBtn = PS.MakeBtn(rightCard, 298, 22, "Автопродажа поглощенных: ?", "dark")
+    srvSellBtn:SetPoint("TOPLEFT", rightCard, "TOPLEFT", 12, -346)
+    srvSellBtn:SetScript("OnClick", function()
+        local as = AP:GetAutoSwapSummary()
+        if not as.unlocked then
+            DEFAULT_CHAT_FRAME:AddMessage("|cffffd200[AttuneParser]|r Автопродажа поглощенных не разблокирована на аккаунте.")
+            return
+        end
+        AP:SetAutoSellActive(not (as.active == true))
+        AP.After(0.25, function() box.RefreshData() end, "ap_ui_srv_ref")
+    end)
+
+    function box.RefreshData()
+        for _, fn in ipairs(updaters) do fn() end
+        local side = AP:GetSetting("ejOverlaySide")
+        ejSideBtn.label:SetText("Сторона оверлея Путеводителя: " .. (side == "LEFT" and "Слева" or "Справа"))
+
+        local tm = AP:GetSetting("talorianMode")
+        talModeBtn.label:SetText("Режим Талориана: " .. (tm == "off" and "|cffff8080Отключен|r" or "|cff40ff40Авто (при наличии питомца)|r"))
+
+        local hasPet, isSum = AP:HasTalorianPet()
+        local talLoaded, talTtpOn, bridgeOn, talOff = false, true, AP:IsTalorianBridgeActive(), (tm == "off")
+        if type(AP.GetTalorianStatus) == "function" then
+            talLoaded, talTtpOn, bridgeOn, talOff = AP:GetTalorianStatus()
+        else
+            talLoaded = (AP._talorianBridge ~= nil) or (type(rawget(_G, "TalorianTP")) == "table")
+            talTtpOn = not (type(_G.TalorianTP_DB) == "table" and _G.TalorianTP_DB.enabled == false)
+        end
+        local petStr = hasPet and (isSum and "|cff40ff40Найден и призван|r" or "|cff40ff40Есть в коллекции|r") or "|cffff8080Отсутствует|r"
+        local modStr = talLoaded and (talTtpOn and "|cff40ff40Подключен|r" or "|cffffd200Загружен (выкл в /ttp)|r") or "|cff94a3b8Не загружен|r"
+        local linkStr = bridgeOn and "|cff40ff40Активна|r" or ((talLoaded and not talTtpOn) and "|cffffd200Выкл в TalorianTP|r" or (talOff and "|cff94a3b8Выкл в AttuneParser|r" or "|cff94a3b8Выкл|r"))
+        talInfo:SetText(string.format(
+            "Спутник Талориан: %s\nМодуль TalorianTP: %s\nАктивность связки: %s\n\nЕсли спутника нет, AttuneParser работает полностью автономно без ошибок и лишних кнопок.",
+            petStr, modStr, linkStr
+        ))
+        if bridgeOn or talLoaded then
+            testTalBtn:Show()
+        else
+            testTalBtn:Hide()
+        end
+
+        local as = AP:GetAutoSwapSummary()
+        PS.PaintBtn(srvAutoBtn, as.on == true and "green" or "dark")
+        srvAutoBtn.label:SetText("Автопогл.: " .. (as.on == true and "ВКЛ" or "ВЫКЛ"))
+        PS.PaintBtn(srvBoeBtn, as.boeAllowed == true and "green" or "dark")
+        srvBoeBtn.label:SetText("BoE: " .. (as.boeAllowed == true and "ДА" or "НЕТ"))
+        if as.unlocked then
+            PS.PaintBtn(srvSellBtn, as.active and "green" or "dark")
+            srvSellBtn.label:SetText("Автопродажа поглощенных: " .. (as.active and "ВКЛ" or "ВЫКЛ"))
+        else
+            PS.PaintBtn(srvSellBtn, "gray")
+            srvSellBtn.label:SetText("Автопродажа: не разблокирована")
+        end
+    end
+
+    return box
+end
+
+local function CreateMainWindow()
+    if mainFrame then return mainFrame end
+    local f = CreateFrame("Frame", "AttuneParserFrame", UIParent)
+    f:SetSize(696, 548)
+    f:SetPoint("CENTER")
+    f:SetFrameStrata("MEDIUM")
+    f:SetToplevel(true)
+    f:EnableMouse(true)
+    f:SetMovable(true)
+    f:RegisterForDrag("LeftButton")
+    f:SetScript("OnDragStart", f.StartMoving)
+    f:SetScript("OnDragStop", f.StopMovingOrSizing)
+    f:SetClampedToScreen(true)
+    f:Hide()
+    PS.ApplyWindow(f)
+    table.insert(UISpecialFrames, "AttuneParserFrame")
+    mainFrame = f
+
+    local hdr = f:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+    hdr:SetPoint("TOPLEFT", f, "TOPLEFT", 18, -11)
+    hdr:SetText("|cffffd200AttuneParser|r")
+
+    f.subText = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    f.subText:SetPoint("TOPLEFT", f, "TOPLEFT", 18, -37)
+    f.subText:SetPoint("TOPRIGHT", f, "TOPRIGHT", -18, -37)
+    f.subText:SetHeight(16)
+    f.subText:SetJustifyH("LEFT")
+    if f.subText.SetWordWrap then f.subText:SetWordWrap(false) end
+
+    local closeBtn = CreateFrame("Button", nil, f)
+    closeBtn:SetPoint("TOPRIGHT", f, "TOPRIGHT", -12, -10)
+    PS.StyleClose(closeBtn, 24)
+    closeBtn:SetScript("OnClick", function() f:Hide() end)
+
+    f.claimBtn = PS.MakeBtn(f, 80, 22, "Вехи", "dark")
+    f.claimBtn:SetPoint("RIGHT", closeBtn, "LEFT", -6, 0)
+    f.claimBtn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+    f.claimBtn:SetScript("OnClick", function(_, mouseBtn)
+        local ms = AP:GetMilestonesSummary()
+        if mouseBtn == "RightButton" then
+            AP:RequestServerSync(true)
+            DEFAULT_CHAT_FRAME:AddMessage("|cff38bdf8[AttuneParser]|r Запрошено обновление вех и прогресса с сервера.")
+            AP.After(0.5, function() AP:RefreshUI() end, "ap_ui_claim_hdr")
+            return
+        end
+        if (ms.claimable or 0) > 0 then
+            local n = AP:ClaimAllMilestones()
+            DEFAULT_CHAT_FRAME:AddMessage("|cff40ff40[AttuneParser]|r Отправлено запросов на награды вех: " .. n)
+            AP.After(0.6, function() AP:RefreshUI() end, "ap_ui_claim_hdr")
+        else
+            AP:RequestServerSync(false)
+            AP:OpenUI("summary")
+            if not ms.loaded then
+                DEFAULT_CHAT_FRAME:AddMessage("|cff38bdf8[AttuneParser]|r Вехи загружаются с сервера... Открыт «Обзор и Дары».")
+            else
+                DEFAULT_CHAT_FRAME:AddMessage(string.format("|cff38bdf8[AttuneParser]|r Вехи: поглощено %d | доступно наград: 0%s",
+                    ms.done or 0, ms.nextNeed and (" | след. веха на " .. ms.nextNeed .. " (ост. " .. (ms.nextRemain or 0) .. ")") or ""))
+            end
+        end
+    end)
+    f.claimBtn:SetScript("OnEnter", function(self)
+        local ms = AP:GetMilestonesSummary()
+        GameTooltip:SetOwner(self, "ANCHOR_BOTTOMLEFT")
+        GameTooltip:SetText("|cffffd200Вехи поглощения|r")
+        if not ms.loaded then
+            GameTooltip:AddLine("Данные вех еще не загружены с сервера.", 0.9, 0.9, 0.9)
+        else
+            GameTooltip:AddLine(string.format("Поглощено: |cffffffff%d|r | Доступно наград: %s%d|r",
+                ms.done or 0, (ms.claimable or 0) > 0 and "|cff40ff40" or "|cff94a3b8", ms.claimable or 0), 1, 1, 1)
+            local list = (AP.serverMilestones and AP.serverMilestones.list) or {}
+            local shown = 0
+            for _, m in ipairs(list) do
+                if m.state == 1 or (m.state == 0 and (m.need or 0) > (ms.done or 0)) then
+                    local rew = {}
+                    if (m.elixir or 0) > 0 then table.insert(rew, m.elixir .. " эликс.") end
+                    if (m.epic or 0) > 0 then table.insert(rew, m.epic .. " эпик") end
+                    if (m.leg or 0) > 0 then table.insert(rew, m.leg .. " лег") end
+                    if (m.tit or 0) > 0 then table.insert(rew, m.tit .. " титан") end
+                    local rStr = #rew > 0 and table.concat(rew, ", ") or "награда"
+                    if m.state == 1 then
+                        GameTooltip:AddLine(string.format("  |cff40ff40[Готово]|r %d предм. -> %s", m.need or 0, rStr), 1, 1, 1)
+                    else
+                        GameTooltip:AddLine(string.format("  |cffffd200[%d]|r ост. %d -> %s", m.need or 0, math.max(0, (m.need or 0) - (ms.done or 0)), rStr), 0.85, 0.85, 0.85)
+                    end
+                    shown = shown + 1
+                    if shown >= 4 then break end
+                end
+            end
+        end
+        GameTooltip:AddLine(" ")
+        GameTooltip:AddLine("|cff94a3b8ЛКМ: забрать доступные вехи / открыть «Обзор и Дары»\nПКМ: обновить данные с сервера|r", 1, 1, 1)
+        GameTooltip:Show()
+    end)
+    f.claimBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+
+    f.ejBtn = PS.MakeBtn(f, 98, 22, "Путеводитель", "dark")
+    f.ejBtn:SetPoint("RIGHT", f.claimBtn, "LEFT", -4, 0)
+    f.ejBtn:SetScript("OnClick", function()
+        if type(AP.ToggleEncounterJournal) == "function" then
+            AP:ToggleEncounterJournal()
+        elseif type(AP.OpenEncounterJournal) == "function" then
+            AP:OpenEncounterJournal()
+        end
+    end)
+    f.ejBtn:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_BOTTOMLEFT")
+        GameTooltip:SetText("|cffffd200Путеводитель по приключениям|r")
+        GameTooltip:AddLine("ЛКМ: Открыть или закрыть Путеводитель", 0.9, 0.9, 0.9)
+        GameTooltip:Show()
+    end)
+    f.ejBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+
+    f.atlasBtn = PS.MakeBtn(f, 60, 22, "Атлас", "dark")
+    f.atlasBtn:SetPoint("RIGHT", f.ejBtn, "LEFT", -4, 0)
+    f.atlasBtn:SetScript("OnClick", function() AP:OpenAtlas() end)
+
+    f.talBtn = PS.MakeBtn(f, 76, 22, "Талориан", "green")
+    f.talBtn:SetPoint("RIGHT", f.atlasBtn, "LEFT", -4, 0)
+    f.talBtn:SetScript("OnClick", function() AP:OpenTalorianUI() end)
+
+    local tabDefs = {
+        { key = "top", label = "Топ инстов", w = 112 },
+        { key = "summary", label = "Обзор и Дары", w = 122 },
+        { key = "bags", label = "Сумки и Ковка", w = 126 },
+        { key = "settings", label = "Настройки", w = 98 },
+        { key = "server", label = "Сервер и Боссы", w = 136 },
+    }
+    f.tabBtns = {}
+    f.tabPanels = {}
+    local tx = 18
+    for _, td in ipairs(tabDefs) do
+        local tb = PS.MakeBtn(f, td.w, 26, td.label, "dark")
+        tb:SetPoint("TOPLEFT", f, "TOPLEFT", tx, -58)
+        tx = tx + td.w + 6
+        tb:SetScript("OnClick", function() AP:OpenUI(td.key) end)
+        f.tabBtns[td.key] = tb
+    end
+
+    local content = CreateFrame("Frame", nil, f)
+    content:SetPoint("TOPLEFT", f, "TOPLEFT", 18, -92)
+    content:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -18, 16)
+    f.content = content
+
+    f.tabPanels.top = BuildTopTab(content)
+    f.tabPanels.summary = BuildSummaryTab(content)
+    f.tabPanels.bags = BuildBagsTab(content)
+    f.tabPanels.settings = BuildSettingsTab(content)
+    f.tabPanels.server = (type(AP.BuildServerSyncTab) == "function") and AP.BuildServerSyncTab(content) or CreateFrame("Frame", nil, content)
+
+    f.activeTab = "top"
+    f:SetScript("OnShow", function()
+        PlaySound("igCharacterInfoOpen")
+        AP:RefreshUI()
+    end)
+    f:SetScript("OnHide", function()
+        PlaySound("igCharacterInfoClose")
+    end)
+    return f
+end
+
+function AP:RefreshUI()
+    if not mainFrame or not mainFrame:IsShown() then return end
+    RefreshHeaderAndFooter()
+    for k, panel in pairs(mainFrame.tabPanels) do
+        if k == mainFrame.activeTab then
+            panel:Show()
+            if panel.RefreshData then panel.RefreshData() end
+        else
+            panel:Hide()
+        end
+    end
+end
+
+function AP:OpenUI(tabKey)
+    local f = CreateMainWindow()
+    if tabKey and f.tabPanels[tabKey] then
+        f.activeTab = tabKey
+    end
+    f:Show()
+    AP:RefreshUI()
+end
+
+function AP:ToggleUI(tabKey)
+    if mainFrame and mainFrame:IsShown() then
+        if tabKey and mainFrame.activeTab ~= tabKey and mainFrame.tabPanels[tabKey] then
+            AP:OpenUI(tabKey)
+        else
+            mainFrame:Hide()
+        end
+    else
+        AP:OpenUI(tabKey or (mainFrame and mainFrame.activeTab) or "top")
+    end
+end
+
+---------------------------------------------------------------------------
+-- 4. Кнопка у миникарты (AttuneParserMinimapButton) и PrimeHub
+---------------------------------------------------------------------------
+do
+    local mmBtn
+    local MINIMAP_RADIUS = 80
+    local isDragging = false
+
+    local function UpdateMinimapPos()
+        if not mmBtn or not Minimap then return end
+        local deg = tonumber(AP:GetSetting("minimapAngle")) or 225
+        local rad = math.rad(deg)
+        local x = math.cos(rad) * MINIMAP_RADIUS
+        local y = math.sin(rad) * MINIMAP_RADIUS
+        mmBtn:ClearAllPoints()
+        mmBtn:SetPoint("CENTER", Minimap, "CENTER", x, y)
+    end
+
+    local function UpdateMinimapVisibility()
+        if not mmBtn then return end
+        if AP:GetSetting("showMinimap") ~= false then
+            mmBtn:Show()
+            UpdateMinimapPos()
+        else
+            mmBtn:Hide()
+        end
+    end
+
+    local function UpdateMinimapBadge()
+        if not mmBtn then return end
+        local ms = AP:GetMilestonesSummary()
+        if ms and ms.claimable and ms.claimable > 0 then
+            mmBtn.badge:SetText("|cff40ff40+" .. ms.claimable .. "|r")
+            mmBtn.badge:Show()
+        else
+            mmBtn.badge:Hide()
+        end
+    end
+
+    local function CreateMinimapButton()
+        if mmBtn or not Minimap then return mmBtn end
+        local b = CreateFrame("Button", "AttuneParserMinimapButton", Minimap)
+        b:SetSize(32, 32)
+        b:SetFrameStrata("MEDIUM")
+        b:SetFrameLevel(8)
+        b:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+        b:RegisterForDrag("LeftButton")
+        b:SetClampedToScreen(true)
+
+        local icon = b:CreateTexture(nil, "BACKGROUND")
+        icon:SetTexture("Interface\\Icons\\INV_Enchant_EssenceCosmicGreater")
+        icon:SetSize(20, 20)
+        icon:SetPoint("CENTER", 0, 0)
+        b.icon = icon
+
+        local border = b:CreateTexture(nil, "OVERLAY")
+        border:SetTexture("Interface\\Minimap\\MiniMap-TrackingBorder")
+        border:SetSize(52, 52)
+        border:SetPoint("TOPLEFT", b, "TOPLEFT", 0, 0)
+
+        b:SetHighlightTexture("Interface\\Minimap\\UI-Minimap-ZoomButton-Highlight")
+
+        b.badge = b:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        b.badge:SetPoint("BOTTOM", b, "BOTTOM", 0, -2)
+        b.badge:Hide()
+
+        b:SetScript("OnDragStart", function(self)
+            isDragging = true
+            self:SetScript("OnUpdate", function()
+                local mx, my = GetCursorPosition()
+                local scale = Minimap:GetEffectiveScale()
+                mx, my = mx / scale, my / scale
+                local cx, cy = Minimap:GetCenter()
+                if cx and cy then
+                    local deg = math.deg(math.atan2(my - cy, mx - cx))
+                    AP:EnsureSettings().minimapAngle = deg
+                    UpdateMinimapPos()
+                end
+            end)
+        end)
+
+        b:SetScript("OnDragStop", function(self)
+            isDragging = false
+            self:SetScript("OnUpdate", nil)
+            AP:Fire("SETTINGS_UPDATED", "minimapAngle", AP:GetSetting("minimapAngle"))
+        end)
+
+        b:SetScript("OnClick", function(_, mouseBtn)
+            if isDragging then return end
+            if mouseBtn == "RightButton" then
+                AP:OpenUI("settings")
+            elseif IsShiftKeyDown() and type(AP.ToggleEncounterJournal) == "function" then
+                AP:ToggleEncounterJournal()
+            elseif IsShiftKeyDown() and type(AP.OpenEncounterJournal) == "function" then
+                AP:OpenEncounterJournal()
+            else
+                AP:ToggleUI()
+            end
+        end)
+
+        b:SetScript("OnEnter", function(self)
+            GameTooltip:SetOwner(self, "ANCHOR_LEFT")
+            GameTooltip:SetText("|cffffd200AttuneParser|r v" .. tostring(AP.VERSION))
+            local cat = AP:GetAccountCatalogSummary()
+            local ms = AP:GetMilestonesSummary()
+            local gift = AP:GetActiveDailyGift(false)
+            GameTooltip:AddLine(string.format("Каталог: %d/%d (%d%%) | Вехи: %d",
+                cat.doneBase or 0, cat.totalBase or 0, cat.pctBase or 0, ms.done or 0), 0.9, 0.9, 0.9)
+            if (ms.claimable or 0) > 0 then
+                GameTooltip:AddLine("Доступно наград за вехи: |cff40ff40" .. ms.claimable .. "|r", 1, 1, 1)
+            end
+            if gift.active then
+                GameTooltip:AddLine("Дар недели: |cffa855f7" .. (gift.name or "?") .. "|r (" .. (gift.remText or "?") .. ")", 1, 1, 1)
+            end
+            local bags = AP:GetOwnedUpgradeCandidates()
+            if #bags > 0 then
+                GameTooltip:AddLine("В сумках/Кладбоше к поглощению: |cff40ff40" .. #bags .. "|r", 1, 1, 1)
+            end
+            local talLoaded, talTtpOn, talBridgeOn = false, true, AP:IsTalorianBridgeActive()
+            if type(AP.GetTalorianStatus) == "function" then
+                talLoaded, talTtpOn, talBridgeOn = AP:GetTalorianStatus()
+            else
+                talLoaded = (AP._talorianBridge ~= nil) or (type(rawget(_G, "TalorianTP")) == "table")
+                talTtpOn = not (type(_G.TalorianTP_DB) == "table" and _G.TalorianTP_DB.enabled == false)
+            end
+            local mmTalStr = talBridgeOn and "|cff40ff40Подключен|r"
+                or ((talLoaded and not talTtpOn) and "|cffffd200Выключен в /ttp|r" or "|cff94a3b8Автономный режим|r")
+            GameTooltip:AddLine("Талориан: " .. mmTalStr, 0.85, 0.85, 0.85)
+            GameTooltip:AddLine(" ")
+            GameTooltip:AddLine("|cff94a3b8ЛКМ: Открыть/скрыть окно\nПКМ: Настройки\nShift+ЛКМ: Путеводитель по приключениям\nЗажать ЛКМ: Переместить кнопку|r", 1, 1, 1)
+            GameTooltip:Show()
+        end)
+        b:SetScript("OnLeave", function() GameTooltip:Hide() end)
+
+        mmBtn = b
+        UpdateMinimapVisibility()
+        UpdateMinimapBadge()
+        return mmBtn
+    end
+
+    local function RegisterPrimeHubTile()
+        if AP._primeHubReg then return end
+        local ph = rawget(_G, "PrimeHub")
+        if not ph or type(ph.Register) ~= "function" then return end
+        AP._primeHubReg = true
+        pcall(ph.Register, ph, {
+            id = "attune_parser",
+            title = "AttuneParser",
+            icon = "Interface\\Icons\\INV_Enchant_EssenceCosmicGreater",
+            order = 36,
+            status = function()
+                if AP:GetSetting("showPrimeHub") == false then return nil end
+                local cat = AP:GetAccountCatalogSummary()
+                if (cat.totalBase or 0) > 0 then
+                    return string.format("Каталог %d%%", cat.pctBase or 0)
+                end
+                return "Топ и анализ"
+            end,
+            badge = function()
+                if AP:GetSetting("showPrimeHub") == false then return nil end
+                local ms = AP:GetMilestonesSummary()
+                if ms and (ms.claimable or 0) > 0 then
+                    return ms.claimable
+                end
+                return nil
+            end,
+            open = function() AP:ToggleUI("top") end,
+        })
+    end
+
+    local function OnLiveEvent(ev, a1)
+        if ev == "SETTINGS_UPDATED" then
+            if a1 == "showMinimap" or a1 == "minimapAngle" then
+                if a1 == "showMinimap" and AP:GetSetting("showMinimap") ~= false then
+                    KeepAttuneMinimapInPrimeHub()
+                end
+                UpdateMinimapVisibility()
+            elseif a1 == "showPrimeHub" then
+                local ph = rawget(_G, "PrimeHub")
+                if ph and type(ph.Refresh) == "function" then pcall(ph.Refresh, ph) end
+            end
+        end
+        UpdateMinimapBadge()
+        if mainFrame and mainFrame:IsShown() then
+            AP.After(0.08, function() AP:RefreshUI() end, "ap_ui_debounced_refresh")
+        end
+    end
+
+    AP:RegisterCallback("ATTUNE_UPDATED", OnLiveEvent)
+    AP:RegisterCallback("ZONE_UPDATED", OnLiveEvent)
+    AP:RegisterCallback("FORGE_UPDATED", OnLiveEvent)
+    AP:RegisterCallback("MILESTONES_UPDATED", OnLiveEvent)
+    AP:RegisterCallback("DAILY_GIFT_UPDATED", OnLiveEvent)
+    AP:RegisterCallback("PETLOOT_UPDATED", OnLiveEvent)
+    AP:RegisterCallback("PETLOOT_JUNK_UPDATED", OnLiveEvent)
+    AP:RegisterCallback("BAGUM_UPDATED", OnLiveEvent)
+    AP:RegisterCallback("AUTOSWAP_UPDATED", OnLiveEvent)
+    AP:RegisterCallback("PARAGON_UPDATED", OnLiveEvent)
+    AP:RegisterCallback("TALORIAN_BRIDGE_UPDATED", OnLiveEvent)
+    AP:RegisterCallback("SETTINGS_UPDATED", OnLiveEvent)
+    AP:RegisterCallback("SERVER_SYNC_UPDATED", OnLiveEvent)
+
+    local uiEv = CreateFrame("Frame")
+    uiEv:RegisterEvent("PLAYER_LOGIN")
+    uiEv:RegisterEvent("ADDON_LOADED")
+    uiEv:SetScript("OnEvent", function(_, event, a1)
+        if event == "PLAYER_LOGIN" then
+            AP:EnsureSettings()
+            CreateMinimapButton()
+            RegisterPrimeHubTile()
+        elseif event == "ADDON_LOADED" and a1 == "PrimeHub" then
+            RegisterPrimeHubTile()
+        end
+    end)
+end
