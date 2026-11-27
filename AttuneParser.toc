@@ -2,7 +2,7 @@
 ## Title: |cff38bdf8AttuneParser|r
 ## Notes: Самодостаточный анализ поглощения, Топ инстов, Путеводитель и Аукцион (WoW Prime)
 ## Author: Sodoesqai
-## Version: 1.1.2
+## Version: 1.1.3
 ## OptionalDeps: AttuneAtlas, PrimeAuctionHouse, Blizzard_EncounterJournal, PrimeHub
 ## SavedVariables: AttuneParserDB
 

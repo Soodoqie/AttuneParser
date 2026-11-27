@@ -328,7 +328,7 @@ end
 AP_CORE_SHIM = r'''
 AttuneParserDB = AttuneParserDB or { settings = {} }
 local AP = {
-    VERSION = "1.1.2",
+    VERSION = "1.1.3",
     _isShim = true,
     Data = { BuildInfo = { items = 18106 }, Zones = {}, TopMap = {}, Creatures = {} },
     TIER_PCT = { [0] = 20, [1] = 45, [2] = 75, [3] = 100 },
@@ -562,9 +562,33 @@ def run_tests():
     end
     assert(foundIB, "ItemBank candidate missing")
 
-    -- Test 3: WB CD + Disperse shards + Vault spoof protection
-    _G._FireEvent("CHAT_MSG_ADDON", "ASMSG_WB_CD", "1000\t1\t90060:1120;909999:1060", "UNKNOWN", "TestHero")
-    assert(#AP:GetWorldBossList() == 2, "WB list failed")
+    -- Test 3: WB CD + built-in 40 world boss name resolution + Disperse shards + Vault spoof protection
+    do
+        local _origJE_t3 = _G.JOURNALENCOUNTER
+        _G.JOURNALENCOUNTER = nil
+        for eid = 910060, 910099 do
+            local bn = AP:GetWorldBossName(eid)
+            assert(bn and not bn:find("#", 1, true), "WB name fell back to raw ID for " .. tostring(eid) .. ": " .. tostring(bn))
+        end
+        assert(AP:GetWorldBossName(910060) == "Хмуродроб Лютый", "WB 910060 mismatch")
+        assert(AP:GetWorldBossName(910099) == "Один", "WB 910099 mismatch")
+        assert(AP:GetWorldBossName(90075) == "Хелия", "WB alias 90075 mismatch")
+        assert(AP:GetWorldBossName(911005) == "Слияние душ", "WB wave 911005 mismatch")
+        AP.serverSync.wb.names = {}
+        _G.JOURNALENCOUNTER = _origJE_t3
+        _G._FireEvent("CHAT_MSG_ADDON", "ASMSG_WB_CD", "1000\t1\t90060:1120;909999:1060", "UNKNOWN", "TestHero")
+        assert(#AP:GetWorldBossList() == 2, "WB list failed")
+        _G._FireEvent("CHAT_MSG_ADDON", "ASMSG_WB_CD", "1000\t1\t910060:1120;910075:1250;909999:1060", "UNKNOWN", "TestHero")
+        local wbDedup = AP:GetWorldBossList()
+        assert(#wbDedup == 3, "WB 910060+910075+909999 dedup count failed: got " .. #wbDedup)
+        for _, b in ipairs(wbDedup) do
+            assert(b.name and not b.name:find("#", 1, true), "WB row leaked ID: " .. tostring(b.name))
+        end
+        _G._FireEvent("CHAT_MSG_ADDON", "ASMSG_WV2_WBOSS", "0\t0\t0\t910066\t0\t0\t0\tКорстилакс (тест)", "UNKNOWN", "TestHero")
+        assert(AP:GetWorldBossName(910066) == "Корстилакс (тест)", "ASMSG_WV2_WBOSS override failed")
+        AP.serverSync.wb.names = {}
+        _G._FireEvent("CHAT_MSG_ADDON", "ASMSG_WB_CD", "1000\t1\t90060:1120;909999:1060", "UNKNOWN", "TestHero")
+    end
     _G._FireEvent("CHAT_MSG_ADDON", "ASMSG_DSP_SHARD", "0xAABBCC\t2\t1", "UNKNOWN", "TestHero")
     assert(AP:GetDisperseSummary().activeShards == 1, "Disperse shard add failed")
     _G._FireEvent("CHAT_MSG_ADDON", "ASMSG_MPLUS_M_VAULT", "1", "WHISPER", "EvilSpoofer")
@@ -617,13 +641,35 @@ def run_tests():
     assert(SC:SetCustomPinHere() == true and TalorianHUD3DFrame:IsShown(), "HUD QNP failed")
     SC:ClearCustomPin()
 
-    -- Test 9: TalorianTP Tabs 1..5 non-empty!
+    -- Test 9: TalorianTP Tabs 1..5 non-empty + progress bars & item % under destination buttons!
     local ui
-    for tabId = 1, 5 do
-        ui = TTP:OpenUI(tabId)
-        assert(ui and ui:IsShown(), "TalorianTP tab failed: " .. tabId)
+    do
+        local _origGZA_t9 = AP.GetZoneAnalysis
+        AP.GetZoneAnalysis = function(self, zoneId)
+            if zoneId == 4812 then
+                return { totalPool = 40, completedCount = 20, newCount = 10, forgeCount = 10, totalRemainStats = 1500, modeAvailable = true }
+            end
+            return { totalPool = 0, completedCount = 0, newCount = 0, forgeCount = 0, totalRemainStats = 0, modeAvailable = true }
+        end
+        for tabId = 1, 5 do
+            ui = TTP:OpenUI(tabId)
+            assert(ui and ui:IsShown(), "TalorianTP tab failed: " .. tabId)
+        end
+        assert(ui and ui.serverPanel and ui.serverPanel.Refresh ~= nil, "TalorianTP Tab 5 is STILL empty!")
+        ui = TTP:OpenUI(1)
+        local btn0 = ui.destButtons[1]
+        assert(btn0 and btn0.progBg and btn0.progBg:IsShown(), "Tab 1 dest button progBg must be shown!")
+        assert(btn0.progFill and btn0.progFill:IsShown() and btn0.progAbsFill and btn0.progAbsFill:IsShown(),
+            "Tab 1 dest button progFill & progAbsFill must be shown when partially absorbed!")
+        assert(btn0.subtitle and btn0.subtitle:GetText():find("50%", 1, true) and btn0.subtitle:GetText():find("(20/40)", 1, true),
+            "Tab 1 dest button subtitle must display item %! got=" .. tostring(btn0.subtitle and btn0.subtitle:GetText()))
+        assert(ui.quickRaidBtns and ui.quickRaidBtns[1] and ui.quickRaidBtns[1].progBg and ui.quickRaidBtns[1].progBg:IsShown(),
+            "Quick raid button ЦЛК progBg must be shown!")
+        ui = TTP:OpenUI(3)
+        assert(ui.destButtons[1] and ui.destButtons[1].progBg and not ui.destButtons[1].progBg:IsShown(),
+            "Tab 3 (Capitals) dest button progBg must be hidden!")
+        AP.GetZoneAnalysis = _origGZA_t9
     end
-    assert(ui and ui.serverPanel and ui.serverPanel.Refresh ~= nil, "TalorianTP Tab 5 is STILL empty!")
 
     -- Test 10: Real Hardmode Paragon 405 (ignores zero ASMSG_NECK_INFO, tracks ASMSG_PARAGON_XP!)
     local apPar = AP:GetParagonInfo()

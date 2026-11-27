@@ -2378,6 +2378,14 @@ local function HandleServerAddon(prefix, msg)
         local entry = tonumber(a[4])
         if entry and a[8] and a[8] ~= "" then
             SS.wb.names[entry] = a[8]
+            if entry >= 90060 and entry <= 90099 then
+                local realE = 910059 + (entry - 90059)
+                if not SS.wb.names[realE] then SS.wb.names[realE] = a[8] end
+            elseif entry >= 910060 and entry <= 910099 then
+                local offE = 90059 + (entry - 910059)
+                if not SS.wb.names[offE] then SS.wb.names[offE] = a[8] end
+            end
+            AP:Fire("SERVER_SYNC_UPDATED", prefix)
         end
     elseif prefix == "ASMSG_MPLUS_M_VAULT" then
         SS.vault.quick = tonumber(msg) or 0
@@ -2594,25 +2602,80 @@ function AP:GetDisperseSummary()
     }
 end
 
+local WB_NAMES_40 = {
+    "Хмуродроб Лютый", "Рокмора", "Фенрир", "Уларогг Скаломол", "Ана-Муз",
+    "Слияние душ", "Корстилакс", "Хирья", "Смотрящий", "Король-бог Сковальд",
+    "Нал'тира", "Дубосерд", "Дресарон", "Тень Ксавия", "Харбарон",
+    "Хелия", "Урсок", "Скорпирон", "Тихондрий", "Великий магистр Элисанда",
+    "Гул'дан", "Горот", "Харджатан", "Госпожа Сашж'ин", "Атриган",
+    "Бдительная дева", "Разрушитель миров Кин'гарота", "Агграмар", "Кил'джеден", "Аргус Порабощенный",
+    "Вариматрас", "Л'ура", "Властитель преисподней Веролом", "Госпожа Аллюрадель", "Инквизитор Мето",
+    "Наместник Незжар", "Хранительница порталов Азабель", "Виз'адуум Всевидящий", "Гарм", "Один",
+}
+
+local function GetWorldBossIndex(entry)
+    if entry >= 910060 and entry <= 910099 then return entry - 910059 end
+    if entry >= 90060 and entry <= 90099 then return entry - 90059 end
+    if entry >= 911000 and entry <= 911039 then return entry - 910999 end
+    if entry >= 170100 and entry <= 170139 then return entry - 170099 end
+    if entry >= 900060 and entry <= 900099 then return entry - 900059 end
+    return nil
+end
+
+local function GetWorldBossBuiltinName(entry)
+    local idx = GetWorldBossIndex(entry)
+    return idx and WB_NAMES_40[idx] or nil
+end
+
+local function ProbeWorldBossTooltipName(entry)
+    if not entry or entry <= 0 then return nil end
+    if type(InCombatLockdown) == "function" and InCombatLockdown() then return nil end
+    local tip = rawget(_G, "AttuneParserScanTip")
+    if not tip or type(tip.SetHyperlink) ~= "function" then return nil end
+    if type(tip.SetOwner) == "function" and UIParent then
+        tip:SetOwner(UIParent, "ANCHOR_NONE")
+    end
+    if type(tip.ClearLines) == "function" then tip:ClearLines() end
+    local ok = pcall(tip.SetHyperlink, tip, "unit:Creature-0-0-0-0-" .. entry .. "-0")
+    if not ok then return nil end
+    local fs = rawget(_G, "AttuneParserScanTipTextLeft1")
+    local txt = fs and type(fs.GetText) == "function" and fs:GetText() or nil
+    if type(txt) == "string" and txt ~= "" and txt ~= tostring(entry) and not txt:find("^Неизвестно") then
+        SS.wb.names[entry] = txt
+        return txt
+    end
+    return nil
+end
+
 local function ResolveWorldBossName(entry)
+    entry = tonumber(entry) or 0
     if SS.wb.names[entry] then return SS.wb.names[entry] end
-    if entry == 909999 then return "Марафон мировых боссов (CD)" end
+    local idx = GetWorldBossIndex(entry)
+    if idx then
+        local cached = SS.wb.names[910059 + idx] or SS.wb.names[90059 + idx] or SS.wb.names[910999 + idx]
+        if cached then return cached end
+    end
+    if entry == 909999 then return "Марафон мировых боссов (откат)" end
     if entry == 909998 then return "Марафон: завершен" end
     if entry == 909997 then return "Марафон: провален" end
     local wt = rawget(_G, "WaveTrial")
     local byE = wt and wt.data and wt.data.bosses and wt.data.bosses.byEntry
-    if byE and byE[entry] and byE[entry].name then
-        SS.wb.names[entry] = byE[entry].name
-        return byE[entry].name
+    if byE then
+        local bObj = byE[entry] or (idx and (byE[910059 + idx] or byE[90059 + idx] or byE[910999 + idx]))
+        if bObj and bObj.name and bObj.name ~= "" then
+            SS.wb.names[entry] = bObj.name
+            return bObj.name
+        end
     end
     local je = rawget(_G, "JOURNALENCOUNTER")
     if type(je) == "table" then
-        local encId = entry + 80040
+        local enc1 = entry + 80040
+        local encIdx = idx and (170099 + idx) or nil
         for cid = 990001, 990004 do
             local catList = je[cid]
             if type(catList) == "table" then
                 for _, row in ipairs(catList) do
-                    if type(row) == "table" and row[1] == encId and row[2] then
+                    if type(row) == "table" and (row[1] == enc1 or (encIdx and row[1] == encIdx) or row[1] == entry) and row[2] and row[2] ~= "" then
                         SS.wb.names[entry] = row[2]
                         return row[2]
                     end
@@ -2620,11 +2683,22 @@ local function ResolveWorldBossName(entry)
             end
         end
     end
+    local builtin = idx and WB_NAMES_40[idx] or nil
+    if builtin then
+        SS.wb.names[entry] = builtin
+        return builtin
+    end
     local cre = AP.Data and AP.Data.Creatures
     if cre and cre[entry] then
         return tostring(cre[entry])
     end
+    local probed = ProbeWorldBossTooltipName(entry)
+    if probed then return probed end
     return "Мировой босс #" .. tostring(entry)
+end
+
+function AP:GetWorldBossName(entry)
+    return ResolveWorldBossName(entry)
 end
 
 function AP:GetWorldBossList()
@@ -2633,20 +2707,28 @@ function AP:GetWorldBossList()
         nowOffset = SS.wb.srvNow + (GetTime() - SS.wb.locSnap)
     end
     local seen, out = {}, {}
-    -- Check standard range 910060..910099 if JOURNALENCOUNTER or CD table has them
+    for e in pairs(SS.wb.cd) do seen[e] = true end
     local je = rawget(_G, "JOURNALENCOUNTER")
     if type(je) == "table" then
         for cid = 990001, 990004 do
             for _, row in ipairs(je[cid] or {}) do
                 if type(row) == "table" and row[1] then
                     local entry = row[1] - 80040
-                    seen[entry] = true
-                    if row[2] then SS.wb.names[entry] = row[2] end
+                    local idx = GetWorldBossIndex(entry)
+                    if row[2] and row[2] ~= "" then
+                        SS.wb.names[entry] = row[2]
+                        if idx then
+                            local realE = 910059 + idx
+                            SS.wb.names[realE] = SS.wb.names[realE] or row[2]
+                        end
+                    end
+                    if not (idx and (seen[910059 + idx] or seen[910999 + idx])) then
+                        seen[entry] = true
+                    end
                 end
             end
         end
     end
-    for e in pairs(SS.wb.cd) do seen[e] = true end
     for entry in pairs(seen) do
         local readyAt = SS.wb.cd[entry] or 0
         local rem = (nowOffset > 0 and readyAt > nowOffset) and (readyAt - nowOffset) or 0
@@ -5169,8 +5251,9 @@ function AP.BuildServerSyncTab(parent)
         r:SetPoint("TOPRIGHT", sf, "TOPRIGHT", -16, -(i - 1) * WB_H)
         r.nm = r:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
         r.nm:SetPoint("LEFT", 4, 0)
-        r.nm:SetSize(210, 14)
+        r.nm:SetSize(202, 14)
         r.nm:SetJustifyH("LEFT")
+        if r.nm.SetWordWrap then r.nm:SetWordWrap(false) end
         r.cd = r:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
         r.cd:SetPoint("RIGHT", -4, 0)
         r.cd:SetSize(74, 14)
@@ -5224,7 +5307,7 @@ function AP.BuildServerSyncTab(parent)
             or "|cff94a3b8ВЫКЛ|r"
 
         statusTxt:SetText(string.format(
-            "Банк вещей: |cffffffff%d/%d|r | Автонадевание:%s(%d) | Склад:%s(%d)\nБанк ресурсов: |cffffffff%d/%d|r видов | Пыль: %d М / %d П / %d А\nРасщепление: навык |cff38bdf8%d/%d|r (ранг %d) | Осколки: %s\nЭфир сессии: +%d пыли (+%d навык)\nНаграда ключей M+: %s",
+            "Банк вещей: |cffffffff%d/%d|r | Автонадевание:%s(%d) | Склад:%s(%d)\nБанк ресурсов: |cffffffff%d/%d|r видов | Пыль: %d Мерц / %d Пыл / %d Астр\nРасщепление: навык |cff38bdf8%d/%d|r (ранг %d) | Осколки: %s\nЭфир сессии: +%d пыли (+%d навык)\nНаграда ключей M+: %s",
             ibCnt, SS.ib.cap or 0, ibAutoStr, ibSum.eligibleCount or 0, ibPutStr, ibPutSum.eligibleCount or 0,
             st.rbUsed or 0, st.rbMax or 0, st.rbDustEpic or 0, st.rbDustLeg or 0, st.rbDustTit or 0,
             dsp.skill or 0, dsp.maxSkill or 0, dsp.rank or 0, shardStr,
