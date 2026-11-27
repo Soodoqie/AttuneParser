@@ -302,19 +302,19 @@ local ERA_EXP = {
 }
 
 local STAT_NAMES = {
-    [3] = "Ловкость", [4] = "Сила", [5] = "Интеллект", [6] = "Дух", [7] = "Выносл.",
-    [12] = "Защита", [13] = "Уклон.", [14] = "Парир.", [15] = "Блок щитом",
-    [31] = "Меткость", [32] = "Крит", [35] = "Устойч.", [36] = "Скорость",
-    [37] = "Мастерство", [38] = "Сила атаки", [44] = "РПБ", [45] = "Сила закл.",
-    [46] = "Мана/5с", [47] = "Проник. закл.", [48] = "Блок (рейтинг)",
+    [3] = "Ловкость", [4] = "Сила", [5] = "Интеллект", [6] = "Дух", [7] = "Выносливость",
+    [12] = "Защита", [13] = "Уклонение", [14] = "Парирование", [15] = "Блок щитом",
+    [31] = "Меткость", [32] = "Крит. удар", [35] = "Устойчивость", [36] = "Скорость",
+    [37] = "Мастерство", [38] = "Сила атаки", [44] = "Пробивание брони", [45] = "Сила заклинаний",
+    [46] = "Восст. маны", [47] = "Проник. заклинаний", [48] = "Показатель блока",
 }
 
 local function FormatLocation(w)
-    if w == "petloot" then return "|cffff80ffКладбоша|r" end
-    if w == "itembank" then return "|cff60a5faИБ|r" end
-    if w == "guild" then return "|cff40ff80ГБ|r" end
+    if w == "petloot" then return "|cffff80ffСборщик|r" end
+    if w == "itembank" then return "|cff60a5faБанк вещей|r" end
+    if w == "guild" then return "|cff40ff80Гильдбанк|r" end
     if w == "bank" then return "|cff38bdf8Банк|r" end
-    if w == "equip" then return "|cffffd200Экип|r" end
+    if w == "equip" then return "|cffffd200Надетые|r" end
     return "|cffffffffСумка|r"
 end
 
@@ -822,7 +822,7 @@ local function BuildTopTab(parent)
                 end
                 if d.ownedCount and d.ownedCount > 0 then
                     GameTooltip:AddLine(" ")
-                    GameTooltip:AddLine("|cff40ff40Уже есть у вас (сумки/Кладбоша/банк): " .. d.ownedCount .. " шт.|r", 1, 1, 1)
+                    GameTooltip:AddLine("|cff40ff40Уже есть у вас (сумки, банк или сборщик): " .. d.ownedCount .. " шт.|r", 1, 1, 1)
                     for oi = 1, math.min(4, #d.ownedList) do
                         local oit = d.ownedList[oi]
                         GameTooltip:AddLine("  [" .. FormatLocation(oit.where) .. "] " .. ShortItemLink(oit.itemId, oit.name, oit.quality) .. " (+" .. (oit.gainNowStats or 0) .. " стат)", 1, 1, 1)
@@ -1156,9 +1156,9 @@ local function BuildSummaryTab(parent)
         return c
     end
 
-    local c1 = MakeCard(0, 0, 326, 200, "Каталог, Вехи и Талориан")
-    local c2 = MakeCard(334, 0, 326, 200, "Дар недели, Пыль и Опыт")
-    local c3 = MakeCard(0, -208, 326, 180, "Парагон, Спек и Автосвап")
+    local c1 = MakeCard(0, 0, 326, 200, "Каталог, Вехи и Помощник")
+    local c2 = MakeCard(334, 0, 326, 200, "Бонус дня, Пыль и Опыт")
+    local c3 = MakeCard(0, -208, 326, 180, "Уровень, Специализация и Автоматика")
     local c4 = MakeCard(334, -208, 326, 180, "Суммарные статы поглощения")
 
     local claimBtn2 = PS.MakeBtn(c1, 130, 22, "Забрать вехи", "green")
@@ -1168,7 +1168,7 @@ local function BuildSummaryTab(parent)
         AP.After(0.6, function() box.RefreshData() end, "ap_ui_claim2")
     end)
 
-    local scanBtn = PS.MakeBtn(c1, 128, 22, "До-скан базы", "dark")
+    local scanBtn = PS.MakeBtn(c1, 136, 22, "До-скан предметов", "dark")
     scanBtn:SetPoint("LEFT", claimBtn2, "RIGHT", 6, 0)
     scanBtn:SetScript("OnClick", function()
         AP:InvalidateCaches(false)
@@ -1183,7 +1183,7 @@ local function BuildSummaryTab(parent)
         AP.After(0.5, function() box.RefreshData() end, "ap_ui_sync2")
     end)
 
-    local bagumBtn = PS.MakeBtn(c2, 174, 22, "Багум: обмен", "green")
+    local bagumBtn = PS.MakeBtn(c2, 174, 22, "Обмен ресурсов", "green")
     bagumBtn:SetPoint("LEFT", syncBtn2, "RIGHT", 6, 0)
     bagumBtn:Hide()
     bagumBtn:SetScript("OnClick", function()
@@ -1200,20 +1200,20 @@ local function BuildSummaryTab(parent)
     bagumBtn:SetScript("OnEnter", function(self)
         local st = AP:GetForgeMaterialStock()
         GameTooltip:SetOwner(self, "ANCHOR_TOP")
-        GameTooltip:SetText("|cffffd200Быстрый обмен у Багума|r")
-        GameTooltip:AddLine("ЛКМ: обменять 1 шт. (Пылающая->Астр., Мерц.->Пылающая или Триумф->Лед).", 0.9, 0.9, 0.9, true)
+        GameTooltip:SetText("|cffffd200Быстрый обмен ресурсов|r")
+        GameTooltip:AddLine("ЛКМ: обменять 1 шт. (Пылающая -> Астральная, Мерцающая -> Пылающая или Триумф -> Лед).", 0.9, 0.9, 0.9, true)
         GameTooltip:AddLine(string.format("Курс пыли: %d:1 и %d:1 | Комиссия: %dg за крафт.", st.rate1 or 3, st.rate2 or 3, math.floor((st.bagumFeeCopper or 1000000) / 10000)), 0.85, 0.85, 0.85)
         GameTooltip:Show()
     end)
     bagumBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
-    local openTalBtn = PS.MakeBtn(c3, 146, 22, "Открыть Талориана", "green")
+    local openTalBtn = PS.MakeBtn(c3, 136, 22, "Открыть Талориана", "green")
     openTalBtn:SetPoint("BOTTOMLEFT", c3, "BOTTOMLEFT", 10, 6)
     openTalBtn:SetScript("OnClick", function()
         AP:OpenTalorianUI()
     end)
 
-    local autoSwapBtn = PS.MakeBtn(c3, 150, 22, "Автопогл.: ?", "dark")
+    local autoSwapBtn = PS.MakeBtn(c3, 164, 22, "Автопоглощение: ?", "dark")
     autoSwapBtn:SetPoint("BOTTOMRIGHT", c3, "BOTTOMRIGHT", -10, 6)
     autoSwapBtn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
     autoSwapBtn:SetScript("OnClick", function(_, mBtn)
@@ -1228,9 +1228,9 @@ local function BuildSummaryTab(parent)
     autoSwapBtn:SetScript("OnEnter", function(self)
         local as = AP:GetAutoSwapSummary()
         GameTooltip:SetOwner(self, "ANCHOR_TOP")
-        GameTooltip:SetText("|cffffd200Серверное автопоглощение|r")
-        GameTooltip:AddLine("ЛКМ: вкл/выкл автоэкипировку для поглощения", 0.9, 0.9, 0.9)
-        GameTooltip:AddLine("ПКМ: вкл/выкл BoE вещи (" .. (as.boeAllowed and "|cff40ff40разрешены|r" or "|cffff8080нет|r") .. ")", 0.9, 0.9, 0.9)
+        GameTooltip:SetText("|cffffd200Автоматическое поглощение|r")
+        GameTooltip:AddLine("ЛКМ: включить или выключить автоэкипировку для поглощения", 0.9, 0.9, 0.9)
+        GameTooltip:AddLine("ПКМ: разрешить не персональные (BoE) вещи (" .. (as.boeAllowed and "|cff40ff40да|r" or "|cffff8080нет|r") .. ")", 0.9, 0.9, 0.9)
         GameTooltip:Show()
     end)
     autoSwapBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -1247,20 +1247,20 @@ local function BuildSummaryTab(parent)
             talLoaded = (AP._talorianBridge ~= nil) or (type(rawget(_G, "TalorianTP")) == "table")
             talTtpOn = not (type(_G.TalorianTP_DB) == "table" and _G.TalorianTP_DB.enabled == false)
         end
-        local petNote = isSum and " (призван)" or (hasPet and " (в списке петов)" or "")
+        local petNote = isSum and " (призван)" or (hasPet and " (в коллекции)" or "")
         local talTxt = talOff and "|cff94a3b8Отключен в настройках|r"
             or (talBridgeOn and ("|cff40ff40Подключен|r" .. petNote))
-            or ((talLoaded and not talTtpOn) and ("|cffffd200Выключен в /ttp|r" .. petNote))
-            or (hasPet and "|cffffd200Питомец есть, TalorianTP не загружен|r" or "|cff94a3b8Спутник не найден - автономный режим|r")
+            or ((talLoaded and not talTtpOn) and ("|cffffd200Выключен в настройках спутника|r" .. petNote))
+            or (hasPet and "|cffffd200Питомец есть, модуль телепорта не загружен|r" or "|cff94a3b8Спутник не найден - автономный режим|r")
         local catLbl = cat.v2 and "Каталог класса" or "Каталог"
 
         c1.body:SetText(string.format(
-            "%s: |cffffffff%d / %d|r (%d%%)\nАккаунт: |cff40ff40%d|r  |  Герой: |cff38bdf8%d|r\n\nВехи: поглощено |cffffffff%d|r\nДоступно наград: %s%d|r%s\n\nСкан WDB: %s (%d/%d)\nТалориан: %s",
+            "%s: |cffffffff%d / %d|r (%d%%)\nАккаунт: |cff40ff40%d|r  |  Герой: |cff38bdf8%d|r\n\nВехи: поглощено |cffffffff%d|r\nДоступно наград: %s%d|r%s\n\nСкан предметов: %s (%d/%d)\nТалориан: %s",
             catLbl, cat.doneBase or 0, cat.totalBase or 0, cat.pctBase or 0,
             cat.acc or 0, cat.hero or 0,
             ms.done or 0,
             (ms.claimable or 0) > 0 and "|cff40ff40" or "|cff94a3b8", ms.claimable or 0,
-            ms.nextNeed and string.format("\nСлед. веха: %d (ост. %d)", ms.nextNeed, ms.nextRemain or 0) or "",
+            ms.nextNeed and string.format("\nСледующая веха: %d (ост. %d)", ms.nextNeed, ms.nextRemain or 0) or "",
             active and "идет" or "готов", done or 0, tot or 0,
             talTxt
         ))
@@ -1274,12 +1274,12 @@ local function BuildSummaryTab(parent)
         local st = AP:GetForgeMaterialStock()
         local eq = AP:GetEquippedAttuneProgress()
         local craftFeeG = math.floor((st.bagumTitCostCopper or 0) / 10000)
-        local rbNote = st.rbActive and string.format(" (Рес.б: %d/%d)", st.rbUsed or 0, st.rbMax or 0) or ""
+        local rbNote = st.rbActive and string.format(" (Банк ресурсов: %d/%d)", st.rbUsed or 0, st.rbMax or 0) or ""
         local expElixStr = (g.hasExpElixir or eq.hasExpElixir) and "|cff40ff40ДА (x2)|r" or "|cff94a3b8нет|r"
         local guildStr = (eq.guildKnown == false) and "?" or string.format("+%d%%", eq.guildPct or 0)
         c2.body:SetText(string.format(
-            "Активный Дар: %s\n%s\nЭл. погл.: %s | Эл. опыта: %s\nМнож. погл.: |cff40ff40x%.2g|r (Ги %s)\nПыль (Багум %d:1 / %d:1)%s:\n  Мерц: |cffa335ee%d|r -> +%d Пыл | Пыл: |cffff8000%d|r -> +%d Астр\n  Астральная: |cff38bdf8%d|r | Всего Титана: |cff40ff40%d|r (~%dg)\nТит. сундуки: %d | Лед: %d (Триумф->Лед: +%d)\nЭкип. до ковки: ~%d кв. (обычн) / %d (данж)",
-            g.active and ("|cffa855f7" .. (g.name or "Дар") .. "|r (" .. (g.remText or "?") .. ")") or "|cff94a3b8нет|r",
+            "Бонус дня: %s\n%s\nЭликсир погл.: %s | Эликсир опыта: %s\nМножитель: |cff40ff40x%.2g|r (Гильдия %s)\nЗапасы пыли (обмен %d:1 / %d:1)%s:\n  Мерцающая: |cffa335ee%d|r -> +%d Пылающей | Пылающая: |cffff8000%d|r -> +%d Астр.\n  Астральная: |cff38bdf8%d|r | Потенциал Титана: |cff40ff40%d|r (~%dg)\nСундуки: %d | Лед: %d (из Триумфа: +%d)\nДо ковки: ~%d кв. (обычн.) / %d (данж)",
+            g.active and ("|cffa855f7" .. (g.name or "Бонус") .. "|r (" .. (g.remText or "?") .. ")") or "|cff94a3b8нет|r",
             (g.desc and g.desc ~= "") and ("|cffb0a080" .. g.desc .. "|r") or "",
             g.hasElixir and "|cff40ff40ДА|r" or "|cff94a3b8нет|r",
             expElixStr,
@@ -1292,11 +1292,11 @@ local function BuildSummaryTab(parent)
         ))
         if st.bagumOpen and st.bagumDustEnabled and ((st.legDirectToTit or 0) > 0 or (st.epicToLeg or 0) > 0 or (st.triToFrost or 0) > 0) then
             if (st.legDirectToTit or 0) > 0 then
-                bagumBtn.label:SetText("Багум: +1 Астр.")
+                bagumBtn.label:SetText("Обмен: +1 Астральная")
             elseif (st.epicToLeg or 0) > 0 then
-                bagumBtn.label:SetText("Багум: +1 Пылающ.")
+                bagumBtn.label:SetText("Обмен: +1 Пылающая")
             else
-                bagumBtn.label:SetText("Багум: +1 Лед")
+                bagumBtn.label:SetText("Обмен: +1 Лед")
             end
             bagumBtn:Show()
         else
@@ -1310,9 +1310,9 @@ local function BuildSummaryTab(parent)
         local vt = (type(AP.GetMPlusVaultSummary) == "function") and AP:GetMPlusVaultSummary() or {}
         local vStr = (vt.quick == 1) and "|cff40ff40Награда!|r" or ((vt.quick == 2) and "получено" or "ожидание")
         c3.body:SetText(string.format(
-            "Парагон: |cffffd200ур. %d|r (%d / %d, %d%%) | 80 мир: %s\nСпек: |cff38bdf8%s|r%s\nАвтосвап: %s | BoE: %s\nАвтопродажа: %s | ЧС: |cffffd200%d|r\nРасщепл.: %d | Осколки: %d | Хран.M+: %s",
+            "Доп. уровень: |cffffd200ур. %d|r (%d / %d, %d%%) | 80 мир: %s\nСпециализация: |cff38bdf8%s|r%s\nАвтопоглощение: %s | BoE: %s\nАвтопродажа: %s | Черный список: |cffffd200%d|r\nРасщепление: %d | Осколки: %d | Ключи M+: %s",
             par.level or 0, par.curXP or 0, par.maxXP or 0, par.pct or 0,
-            par.worldLocked80 and "|cffff6060Огр.|r" or "|cff40ff40Нет|r",
+            par.worldLocked80 and "|cffff6060Ограничен|r" or "|cff40ff40Нет|r",
             sp.specName or "?", sp.isCustomLegion and " [Legion]" or "",
             as.on == true and "|cff40ff40ВКЛ|r" or (as.on == false and "|cffff6060ВЫКЛ|r" or "|cff94a3b8?|r"),
             as.boeAllowed == true and "|cff40ff40Да|r" or "|cff94a3b8Нет|r",
@@ -1320,7 +1320,7 @@ local function BuildSummaryTab(parent)
             as.blacklistCount or 0,
             dsp.skill or 0, dsp.activeShards or 0, vStr
         ))
-        autoSwapBtn.label:SetText("Автопогл.: " .. (as.on == true and "|cff40ff40ВКЛ|r" or "|cffff8080ВЫКЛ|r"))
+        autoSwapBtn.label:SetText("Автопоглощение: " .. (as.on == true and "|cff40ff40ВКЛ|r" or "|cffff8080ВЫКЛ|r"))
         PS.PaintBtn(autoSwapBtn, as.on == true and "green" or "dark")
         if talBridgeOn or talLoaded then
             openTalBtn:Show()
@@ -1358,7 +1358,7 @@ local function BuildSummaryTab(parent)
     return box
 end
 
--- Вкладка 3: Сумки и Ковка (сумки, банк, экип, Кладбоша, ГБ + ЧС)
+-- Вкладка 3: Сумки и Ковка (сумки, банк, надетые, сборщик, гильдбанк + ЧС)
 local function BuildBagsTab(parent)
     local box = CreateFrame("Frame", nil, parent)
     box:SetAllPoints(parent)
@@ -1375,13 +1375,13 @@ local function BuildBagsTab(parent)
 
     local wBtns = {}
     local filters = {
-        { key = "all", label = "Все", w = 48 },
+        { key = "all", label = "Все", w = 40 },
         { key = "bag", label = "Сумки", w = 54 },
-        { key = "petloot", label = "Кладбоша", w = 68 },
-        { key = "itembank", label = "ИБ", w = 38 },
-        { key = "equip", label = "Экип.", w = 50 },
-        { key = "bank", label = "Банк", w = 50 },
-        { key = "guild", label = "ГБ", w = 38 },
+        { key = "petloot", label = "Сборщик", w = 66 },
+        { key = "itembank", label = "Банк вещей", w = 84 },
+        { key = "equip", label = "Надетые", w = 64 },
+        { key = "bank", label = "Банк", w = 48 },
+        { key = "guild", label = "Гильдбанк", w = 74 },
     }
     local wx = 6
     for _, fl in ipairs(filters) do
@@ -1399,7 +1399,7 @@ local function BuildBagsTab(parent)
         wBtns[fl.key] = b
     end
 
-    local blBtn = PS.MakeBtn(topBar, 88, 22, "Скрыть ЧС", "dark")
+    local blBtn = PS.MakeBtn(topBar, 86, 22, "Скрыть ЧС", "dark")
     blBtn:SetPoint("LEFT", wx + 4, 0)
     blBtn:SetScript("OnClick", function()
         box.hideBlacklist = not box.hideBlacklist
@@ -1417,16 +1417,16 @@ local function BuildBagsTab(parent)
 
     local listBox = CreateFrame("Frame", nil, box)
     listBox:SetPoint("TOPLEFT", topBar, "BOTTOMLEFT", 0, -6)
-    listBox:SetPoint("BOTTOMRIGHT", box, "BOTTOMRIGHT", 0, 52)
+    listBox:SetPoint("BOTTOMRIGHT", box, "BOTTOMRIGHT", 0, 74)
     PS.StyleBox(listBox, 0.36, false)
 
     local actBar = CreateFrame("Frame", nil, box)
     actBar:SetPoint("TOPLEFT", listBox, "BOTTOMLEFT", 0, -4)
     actBar:SetPoint("TOPRIGHT", listBox, "BOTTOMRIGHT", 0, -4)
-    actBar:SetHeight(26)
+    actBar:SetHeight(50)
 
-    local sweepBtn = PS.MakeBtn(actBar, 116, 22, "Продать погл.", "dark")
-    sweepBtn:SetPoint("LEFT", actBar, "LEFT", 0, 0)
+    local sweepBtn = PS.MakeBtn(actBar, 190, 22, "Продать поглощенные", "dark")
+    sweepBtn:SetPoint("TOPLEFT", actBar, "TOPLEFT", 0, 0)
     sweepBtn:SetScript("OnClick", function()
         local as = AP:GetAutoSwapSummary()
         if not as.unlocked then
@@ -1435,7 +1435,7 @@ local function BuildBagsTab(parent)
         end
         if StaticPopupDialogs and StaticPopup_Show then
             StaticPopupDialogs["ATTUNEPARSER_SWEEP_NOW"] = {
-                text = "Продать СЕЙЧАС поглощенные предметы выбранного качества?\n(надетые + сумки; заблокированные замком ЧС не трогаются)",
+                text = "Продать СЕЙЧАС поглощенные предметы выбранного качества?\n(надетые + сумки; заблокированные в ЧС не трогаются)",
                 button1 = YES or "Да",
                 button2 = NO or "Нет",
                 timeout = 0,
@@ -1453,9 +1453,9 @@ local function BuildBagsTab(parent)
     sweepBtn:SetScript("OnEnter", function(self)
         local as = AP:GetAutoSwapSummary()
         GameTooltip:SetOwner(self, "ANCHOR_TOP")
-        GameTooltip:SetText("|cffffd200Очистка поглощенных (ACMSG_AS_SWEEP)|r")
+        GameTooltip:SetText("|cffffd200Продажа поглощенных вещей|r")
         if as.unlocked then
-            GameTooltip:AddLine("ЛКМ: запросить подтверждение и продать поглощенные дубли по настройкам сервера (кроме вещей в ЧС).", 0.9, 0.9, 0.9, true)
+            GameTooltip:AddLine("ЛКМ: запросить подтверждение и продать поглощенные дубли по настройкам фильтра (кроме вещей в ЧС).", 0.9, 0.9, 0.9, true)
         else
             GameTooltip:AddLine("Требует разблокировку автопродажи поглощенных на аккаунте.", 1, 0.5, 0.5, true)
         end
@@ -1463,8 +1463,8 @@ local function BuildBagsTab(parent)
     end)
     sweepBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
-    local junkBtn = PS.MakeBtn(actBar, 122, 22, "Расщеп. хлам", "dark")
-    junkBtn:SetPoint("LEFT", sweepBtn, "RIGHT", 5, 0)
+    local junkBtn = PS.MakeBtn(actBar, 190, 22, "Расщепить лишний лут", "dark")
+    junkBtn:SetPoint("LEFT", sweepBtn, "RIGHT", 8, 0)
     junkBtn:SetScript("OnClick", function()
         if AP.petLootJunk and AP.petLootJunk.running then
             AP:StopPetLootJunk()
@@ -1474,22 +1474,22 @@ local function BuildBagsTab(parent)
     end)
     junkBtn:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_TOP")
-        GameTooltip:SetText("|cffffd200Кладбоша: расщепить ненужное|r")
-        GameTooltip:AddLine("Сканирует хранилище Кладбоши (протокол 10 + Расщепление эссенций) и предлагает расщепить уже поглощенное/неподходящее.", 0.9, 0.9, 0.9, true)
+        GameTooltip:SetText("|cffffd200Сборщик: расщепление лишнего|r")
+        GameTooltip:AddLine("Сканирует хранилище Сборщика (при навыке 10 и Расщеплении эссенций) и предлагает расщепить уже поглощенное/неподходящее.", 0.9, 0.9, 0.9, true)
         GameTooltip:Show()
     end)
     junkBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
-    local autoTabBtn = PS.MakeBtn(actBar, 106, 22, "Автопогл.: ?", "dark")
-    autoTabBtn:SetPoint("LEFT", junkBtn, "RIGHT", 5, 0)
+    local autoTabBtn = PS.MakeBtn(actBar, 210, 22, "Автопоглощение: ?", "dark")
+    autoTabBtn:SetPoint("LEFT", junkBtn, "RIGHT", 8, 0)
     autoTabBtn:SetScript("OnClick", function()
         local as = AP:GetAutoSwapSummary()
         AP:SetAutoAbsorb(not (as.on == true))
         AP.After(0.25, function() box.RefreshData() end, "ap_ui_as_bags")
     end)
 
-    local rbIbBtn = PS.MakeBtn(actBar, 92, 22, "БР / ИБ", "dark")
-    rbIbBtn:SetPoint("LEFT", autoTabBtn, "RIGHT", 5, 0)
+    local rbIbBtn = PS.MakeBtn(actBar, 190, 22, "Банки ресурсов / вещей", "dark")
+    rbIbBtn:SetPoint("TOPLEFT", actBar, "TOPLEFT", 0, -26)
     rbIbBtn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
     rbIbBtn:SetScript("OnClick", function(_, mBtn)
         if mBtn == "RightButton" then
@@ -1499,8 +1499,8 @@ local function BuildBagsTab(parent)
         end
     end)
 
-    local ibAutoBtn = PS.MakeBtn(actBar, 100, 22, "ИБ-экип:ВЫКЛ", "dark")
-    ibAutoBtn:SetPoint("LEFT", rbIbBtn, "RIGHT", 5, 0)
+    local ibAutoBtn = PS.MakeBtn(actBar, 236, 22, "Автонадевание из банка: ?", "dark")
+    ibAutoBtn:SetPoint("LEFT", rbIbBtn, "RIGHT", 8, 0)
     ibAutoBtn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
     ibAutoBtn:SetScript("OnClick", function(_, mBtn)
         if mBtn == "RightButton" then
@@ -1518,19 +1518,19 @@ local function BuildBagsTab(parent)
     end)
     ibAutoBtn:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_TOP")
-        GameTooltip:SetText("|cffffd200Автонадевание из Банка предметов|r")
-        GameTooltip:AddLine("ЛКМ: вкл/выкл автоэкип непоглощенных вещей из ИБ (работает и в бою, пауза 15с после ручного свапа).", 0.9, 0.9, 0.9, true)
-        GameTooltip:AddLine("ПКМ: надеть 1 подходящую вещь из ИБ прямо сейчас.", 0.4, 1.0, 0.4, true)
+        GameTooltip:SetText("|cffffd200Автонадевание из Банка вещей|r")
+        GameTooltip:AddLine("ЛКМ: вкл/выкл автонадевание непоглощенных вещей из Банка вещей (работает и в бою, пауза 15с после ручного обмена).", 0.9, 0.9, 0.9, true)
+        GameTooltip:AddLine("ПКМ: надеть 1 подходящую вещь из Банка вещей прямо сейчас.", 0.4, 1.0, 0.4, true)
         if type(AP.GetItemBankEquipSummary) == "function" then
             local sum = AP:GetItemBankEquipSummary(true)
-            GameTooltip:AddLine(string.format("В ИБ: %d шт. | Подходящих сейчас: %d", sum.itemCount or 0, sum.eligibleCount or 0), 0.7, 0.85, 1.0, true)
+            GameTooltip:AddLine(string.format("В Банке вещей: %d шт. | Подходящих сейчас: %d", sum.itemCount or 0, sum.eligibleCount or 0), 0.7, 0.85, 1.0, true)
         end
         GameTooltip:Show()
     end)
     ibAutoBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
-    local ibPutBtn = PS.MakeBtn(actBar, 100, 22, "В ИБ: ВЫКЛ", "dark")
-    ibPutBtn:SetPoint("LEFT", ibAutoBtn, "RIGHT", 5, 0)
+    local ibPutBtn = PS.MakeBtn(actBar, 214, 22, "Автосклад в банк: ?", "dark")
+    ibPutBtn:SetPoint("LEFT", ibAutoBtn, "RIGHT", 8, 0)
     ibPutBtn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
     ibPutBtn:SetScript("OnClick", function(_, mBtn)
         if mBtn == "RightButton" then
@@ -1550,21 +1550,21 @@ local function BuildBagsTab(parent)
     end)
     ibPutBtn:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_TOP")
-        GameTooltip:SetText("|cffffd200Автосклад в Банк предметов (ACMSG_IB_PUT)|r")
-        GameTooltip:AddLine("ЛКМ: вкл/выкл автоперенос в ИБ (оставляет вещи до апгрейда ковки и вендора).", 0.9, 0.9, 0.9, true)
+        GameTooltip:SetText("|cffffd200Автосклад в Банк вещей|r")
+        GameTooltip:AddLine("ЛКМ: вкл/выкл автоперенос в Банк вещей (оставляет вещи до ковки и продажи).", 0.9, 0.9, 0.9, true)
         GameTooltip:AddLine("Shift+ЛКМ: сменить режим | ПКМ: положить 1 вещь сейчас.", 0.4, 1.0, 0.4, true)
         if type(AP.GetItemBankPutSummary) == "function" then
             local ps = AP:GetItemBankPutSummary(true)
-            GameTooltip:AddLine(string.format("Режим: %s | Готово к переносу: %d | В сумках для апгрейда: %d", tostring(ps.modeLabel or "?"), ps.eligibleCount or 0, ps.keptUpgrade or 0), 0.7, 0.85, 1.0, true)
+            GameTooltip:AddLine(string.format("Режим: %s | Готово к переносу: %d | Оставлено на улучшение: %d", tostring(ps.modeLabel or "?"), ps.eligibleCount or 0, ps.keptUpgrade or 0), 0.7, 0.85, 1.0, true)
         end
         GameTooltip:Show()
     end)
     ibPutBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
     rbIbBtn:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_TOP")
-        GameTooltip:SetText("|cffffd200Банк ресурсов и Банк предметов|r")
-        GameTooltip:AddLine("ЛКМ: сдать все ресурсы из сумок в Банк ресурсов (ACMSG_RB_DEPOSIT_ALL).", 0.9, 0.9, 0.9, true)
-        GameTooltip:AddLine("ПКМ: открыть окно Банка предметов (/ibank).", 0.9, 0.9, 0.9, true)
+        GameTooltip:SetText("|cffffd200Банк ресурсов и Банк вещей|r")
+        GameTooltip:AddLine("ЛКМ: сдать все ресурсы из сумок в Банк ресурсов.", 0.9, 0.9, 0.9, true)
+        GameTooltip:AddLine("ПКМ: открыть окно Банка вещей (/ibank).", 0.9, 0.9, 0.9, true)
         GameTooltip:Show()
     end)
     rbIbBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -1575,7 +1575,7 @@ local function BuildBagsTab(parent)
     foot:SetJustifyH("LEFT")
 
     local VIS = 12
-    local ROW_H = 29
+    local ROW_H = 26
     local sf = PS.AttachScroll(listBox, VIS * ROW_H, ROW_H, VIS, function() box.RenderRows() end)
     sf:SetPoint("TOPLEFT", listBox, "TOPLEFT", 4, -4)
     sf:SetPoint("BOTTOMRIGHT", listBox, "BOTTOMRIGHT", -4, 4)
@@ -1590,25 +1590,25 @@ local function BuildBagsTab(parent)
 
         r.locTxt = r:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
         r.locTxt:SetPoint("LEFT", r, "LEFT", 6, 0)
-        r.locTxt:SetSize(72, 16)
+        r.locTxt:SetSize(84, 16)
         r.locTxt:SetJustifyH("LEFT")
         if r.locTxt.SetWordWrap then r.locTxt:SetWordWrap(false) end
 
         r.nameTxt = r:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
         r.nameTxt:SetPoint("LEFT", r.locTxt, "RIGHT", 4, 0)
-        r.nameTxt:SetSize(275, 16)
+        r.nameTxt:SetSize(256, 16)
         r.nameTxt:SetJustifyH("LEFT")
         if r.nameTxt.SetWordWrap then r.nameTxt:SetWordWrap(false) end
 
         r.tierTxt = r:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
         r.tierTxt:SetPoint("LEFT", r.nameTxt, "RIGHT", 4, 0)
-        r.tierTxt:SetSize(155, 16)
+        r.tierTxt:SetSize(162, 16)
         r.tierTxt:SetJustifyH("LEFT")
         if r.tierTxt.SetWordWrap then r.tierTxt:SetWordWrap(false) end
 
         r.statTxt = r:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
         r.statTxt:SetPoint("RIGHT", r, "RIGHT", -8, 0)
-        r.statTxt:SetSize(85, 16)
+        r.statTxt:SetSize(88, 16)
         r.statTxt:SetJustifyH("RIGHT")
         if r.statTxt.SetWordWrap then r.statTxt:SetWordWrap(false) end
 
@@ -1623,12 +1623,12 @@ local function BuildBagsTab(parent)
             end
             if IsAltKeyDown and IsAltKeyDown() and it.where == "petloot" and it.dbId then
                 if AP:TakePetLootItem(it.dbId, it.count) then
-                    DEFAULT_CHAT_FRAME:AddMessage("|cff40ff40[AttuneParser]|r Запрошено забрать из Кладбоши: " .. tostring(it.name or it.itemId))
+                    DEFAULT_CHAT_FRAME:AddMessage("|cff40ff40[AttuneParser]|r Запрошено забрать из Сборщика: " .. tostring(it.name or it.itemId))
                 end
                 return
             elseif IsAltKeyDown and IsAltKeyDown() and it.where == "itembank" and it.guid then
                 if type(AP.TakeItemBankItem) == "function" and AP:TakeItemBankItem(it.guid) then
-                    DEFAULT_CHAT_FRAME:AddMessage("|cff40ff40[AttuneParser]|r Запрошено забрать из Банка предметов: " .. tostring(it.name or it.itemId))
+                    DEFAULT_CHAT_FRAME:AddMessage("|cff40ff40[AttuneParser]|r Запрошено забрать из Банка вещей: " .. tostring(it.name or it.itemId))
                 end
                 return
             end
@@ -1648,8 +1648,13 @@ local function BuildBagsTab(parent)
             local it = self._item
             if not it then return end
             local isInst = (it.primaryZone and it.primaryZone > 0 and AP:IsZoneInstance(it.primaryZone)) and true or false
-            local petHint = (it.where == "petloot" and it.dbId) and " | Alt+ЛКМ: забрать в сумку" or ((it.where == "itembank" and it.guid) and " | Alt+ЛКМ: забрать из ИБ" or "")
+            local petHint = (it.where == "petloot" and it.dbId) and " | Alt+ЛКМ: забрать в сумку" or ((it.where == "itembank" and it.guid) and " | Alt+ЛКМ: забрать из Банка вещей" or "")
             local blHint = " | ПКМ: вкл/выкл ЧС"
+            local exLine = it.needsForgeUpgrade
+                and string.format("В наличии (%s): тир %s | нужна ковка до 90%% (ост. +%d стат)",
+                    FormatLocation(it.where), it.instanceTierName or "?", it.remainStats or 0)
+                or string.format("В наличии (%s): тир %s -> +%d%% (+%d стат сейчас)",
+                    FormatLocation(it.where), it.instanceTierName or "?", it.gainNowPct or 0, it.gainNowStats or 0)
             GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
             AP:BuildItemTooltip(GameTooltip, it.itemId, {
                 sfx = it.sfx,
@@ -1658,8 +1663,7 @@ local function BuildBagsTab(parent)
                 quality = it.quality,
                 tier = it.instanceTier,
                 zoneId = it.primaryZone,
-                extraLine = string.format("В наличии (%s): тир %s -> +%d%% (+%d стат сейчас)",
-                    FormatLocation(it.where), it.instanceTierName or "?", it.gainNowPct or 0, it.gainNowStats or 0),
+                extraLine = exLine,
                 hint = isInst
                     and ("|cff94a3b8ЛКМ: Путеводитель | Shift+ЛКМ: в чат | Ctrl+ЛКМ: примерить" .. petHint .. blHint .. "|r")
                     or ("|cff94a3b8Shift+ЛКМ: в чат | Ctrl+ЛКМ: примерить" .. petHint .. blHint .. "|r"),
@@ -1687,8 +1691,13 @@ local function BuildBagsTab(parent)
                 local dStr = (dTag ~= "") and ("|cff94a3b8[" .. dTag .. "]|r ") or ""
                 local bl = it.isBlacklisted and " |cffff5050[ЧС]|r" or ""
                 r.nameTxt:SetText(dStr .. ShortItemLink(it.itemId, it.name, it.quality) .. bl)
-                r.tierTxt:SetText(string.format("%s -> |cff40ff40+%d%%|r", it.instanceTierName or "?", it.gainNowPct or 0))
-                r.statTxt:SetText("|cff40ff40+" .. (it.gainNowStats or 0) .. " стат|r")
+                if it.needsForgeUpgrade then
+                    r.tierTxt:SetText(string.format("%s | %d%% -> |cffffd200ковка|r", it.instanceTierName or "?", it.curPct or 0))
+                    r.statTxt:SetText("|cffffd200+" .. (it.remainStats or 0) .. " пот.|r")
+                else
+                    r.tierTxt:SetText(string.format("%s -> |cff40ff40+%d%%|r", it.instanceTierName or "?", it.gainNowPct or 0))
+                    r.statTxt:SetText("|cff40ff40+" .. (it.gainNowStats or 0) .. " стат|r")
+                end
             end
         end
     end
@@ -1699,9 +1708,9 @@ local function BuildBagsTab(parent)
         end
         PS.PaintBtn(blBtn, box.hideBlacklist and "green" or "dark")
 
-        local cands = AP:GetOwnedUpgradeCandidates()
+        local cands = AP:GetOwnedUpgradeCandidates(nil, true)
         local filtered = {}
-        local totGain, petCnt, blCnt = 0, 0, 0
+        local readyCnt, forgeCnt, totGain, totForge, petCnt, blCnt = 0, 0, 0, 0, 0, 0
         for _, it in ipairs(cands) do
             if it.where == "petloot" then petCnt = petCnt + 1 end
             if it.isBlacklisted then blCnt = blCnt + 1 end
@@ -1709,35 +1718,41 @@ local function BuildBagsTab(parent)
             local bOk = (not box.hideBlacklist) or (not it.isBlacklisted)
             if wOk and bOk then
                 table.insert(filtered, it)
-                totGain = totGain + (it.gainNowStats or 0)
+                if it.needsForgeUpgrade then
+                    forgeCnt = forgeCnt + 1
+                    totForge = totForge + (it.remainStats or 0)
+                else
+                    readyCnt = readyCnt + 1
+                    totGain = totGain + (it.gainNowStats or 0)
+                end
             end
         end
         box.data = filtered
         sf:SetTotal(#filtered, false)
         local as = AP:GetAutoSwapSummary()
         PS.PaintBtn(sweepBtn, as.unlocked and "dark" or "gray")
-        sweepBtn.label:SetText(as.unlocked and "Продать поглощ." or "Продать (замок)")
+        sweepBtn.label:SetText(as.unlocked and "Продать поглощенные" or "Продать (замок)")
         local jRun = AP.petLootJunk and AP.petLootJunk.running
         if jRun then
             PS.PaintBtn(junkBtn, "red")
             junkBtn.label:SetText(string.format("Стоп %d/%d", jRun[1] or 0, jRun[2] or 0))
         elseif AP:CanPetLootJunk() then
             PS.PaintBtn(junkBtn, "green")
-            junkBtn.label:SetText("Расщепить хлам")
+            junkBtn.label:SetText("Расщепить лишний лут")
         else
             PS.PaintBtn(junkBtn, "gray")
-            junkBtn.label:SetText("Расщепить хлам")
+            junkBtn.label:SetText("Расщепить лишний лут")
         end
         PS.PaintBtn(autoTabBtn, as.on == true and "green" or "dark")
-        autoTabBtn.label:SetText("Автопогл: " .. (as.on == true and "ВКЛ" or "ВЫКЛ"))
+        autoTabBtn.label:SetText("Автопоглощение: " .. (as.on == true and "ВКЛ" or "ВЫКЛ"))
         local ibOn = (AP:GetSetting("ibAutoEquip") == true)
         PS.PaintBtn(ibAutoBtn, ibOn and "green" or "dark")
-        ibAutoBtn.label:SetText("ИБ-экип:" .. (ibOn and "ВКЛ" or "ВЫК"))
+        ibAutoBtn.label:SetText("Автонадевание из банка: " .. (ibOn and "ВКЛ" or "ВЫКЛ"))
         local putOn = (AP:GetSetting("ibAutoPut") == true)
         PS.PaintBtn(ibPutBtn, putOn and "green" or "dark")
-        ibPutBtn.label:SetText("В ИБ: " .. (putOn and "ВКЛ" or "ВЫКЛ"))
-        foot:SetText(string.format("|cffb0a080Готово к поглощению: %d предм.|r (суммарно |cff40ff40+%d стат|r) | Кладбоша: %d | ЧС: %d",
-            #filtered, totGain, petCnt, blCnt))
+        ibPutBtn.label:SetText("Автосклад в банк: " .. (putOn and "ВКЛ" or "ВЫКЛ"))
+        foot:SetText(string.format("|cffb0a080Готово: %d (|cff40ff40+%d стат|r|cffb0a080) | На ковку: %d (|cffffd200+%d|r|cffb0a080) | Сборщик: %d | ЧС: %d|r",
+            readyCnt, totGain, forgeCnt, totForge, petCnt, blCnt))
     end
 
     return box
@@ -1809,11 +1824,11 @@ local function BuildSettingsTab(parent)
     end
 
     AddToggle(leftCard, -36, "showMinimap", "Кнопка у миникарты", "Показывать или скрывать кнопку AttuneParser у миникарты (/ap minimap).")
-    AddToggle(leftCard, -64, "showPrimeHub", "Плитка в PrimeHub", "Регистрировать кнопку AttuneParser в серверном центре аддонов PrimeHub.")
-    AddToggle(leftCard, -92, "showAuctionUI", "Помощник на аукционе", "Показывать кнопку и панель фильтра поглощения на аукционе (PrimeAH и 3.3.5).")
-    AddToggle(leftCard, -120, "showEJOverlay", "Оверлей Путеводителя по приключениям", "Боковая панель прогресса инста, вещей в сумках и Дара среды в Путеводителе.")
-    AddToggle(leftCard, -148, "showEJBadges", "Значки поглощения на луте Путеводителя", "Показывать [+20%] / [Ков] / [90%] / [ЧС] прямо на строках дропа в Путеводителе.")
-    AddToggle(leftCard, -176, "tradeAlert", "Оповещение в чате при обмене (Trade)", "Выводить в чат сводку по поглощаемым/недокованным вещам в окне обмена.")
+    AddToggle(leftCard, -64, "showPrimeHub", "Значок в меню аддонов", "Показывать плитку AttuneParser в общем центре аддонов.")
+    AddToggle(leftCard, -92, "showAuctionUI", "Помощник на аукционе", "Показывать кнопку и панель фильтра поглощения на аукционе.")
+    AddToggle(leftCard, -120, "showEJOverlay", "Панель в Путеводителе", "Боковая панель прогресса подземелья, вещей в сумках и бонусов в Путеводителе.")
+    AddToggle(leftCard, -148, "showEJBadges", "Отметки добычи в Путеводителе", "Показывать значки прогресса и ковки прямо на строках добычи.")
+    AddToggle(leftCard, -176, "tradeAlert", "Сводка в чате при обмене", "Выводить в чат сводку по поглощаемым и недокованным вещам в окне обмена.")
 
     local ejSideBtn = PS.MakeBtn(leftCard, 298, 24, "Сторона оверлея Путеводителя: Справа", "dark")
     ejSideBtn:SetPoint("TOPLEFT", leftCard, "TOPLEFT", 12, -214)
@@ -1839,9 +1854,9 @@ local function BuildSettingsTab(parent)
         DEFAULT_CHAT_FRAME:AddMessage("|cff38bdf8[AttuneParser]|r Позиция кнопки аукциона сброшена.")
     end)
 
-    AddToggle(rightCard, -36, "wedAuto", "Авто-режим «Дар Среды: Ковка»", "По средам при открытии Топа автоматически включать приоритет ковки до Титаника.")
-    AddToggle(rightCard, -64, "excludeHeavyQuests", "Исключать тяжелые квест-цепочки", "Скрывать труднодоступные квестовые награды из рекомендаций фарма инстов.")
-    AddToggle(rightCard, -92, "autoWarmStats", "Авто-прогрев базы предметов (WDB)", "После входа плавно до-загружать статы редких предметов в фоне без лагов.")
+    AddToggle(rightCard, -36, "wedAuto", "Приоритет ковки по средам", "По средам при открытии списка автоматически включать приоритет ковки до 90%.")
+    AddToggle(rightCard, -64, "excludeHeavyQuests", "Исключать тяжелые квест-цепочки", "Скрывать труднодоступные квестовые награды из рекомендаций фарма.")
+    AddToggle(rightCard, -92, "autoWarmStats", "Фоновая загрузка характеристик", "После входа плавно до-загружать характеристики редких предметов без лагов.")
 
     local talHdr = rightCard:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     talHdr:SetPoint("TOPLEFT", 12, -138)
@@ -1866,9 +1881,9 @@ local function BuildSettingsTab(parent)
 
     local srvHdr = rightCard:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     srvHdr:SetPoint("TOPLEFT", 12, -296)
-    srvHdr:SetText("|cffffd200Серверное автопоглощение и продажа|r")
+    srvHdr:SetText("|cffffd200Автопоглощение и автопродажа|r")
 
-    local srvAutoBtn = PS.MakeBtn(rightCard, 146, 22, "Автопогл.: ?", "dark")
+    local srvAutoBtn = PS.MakeBtn(rightCard, 166, 22, "Автопоглощение: ?", "dark")
     srvAutoBtn:SetPoint("TOPLEFT", rightCard, "TOPLEFT", 12, -318)
     srvAutoBtn:SetScript("OnClick", function()
         local as = AP:GetAutoSwapSummary()
@@ -1876,7 +1891,7 @@ local function BuildSettingsTab(parent)
         AP.After(0.25, function() box.RefreshData() end, "ap_ui_srv_ref")
     end)
 
-    local srvBoeBtn = PS.MakeBtn(rightCard, 146, 22, "BoE: ?", "dark")
+    local srvBoeBtn = PS.MakeBtn(rightCard, 126, 22, "BoE: ?", "dark")
     srvBoeBtn:SetPoint("LEFT", srvAutoBtn, "RIGHT", 6, 0)
     srvBoeBtn:SetScript("OnClick", function()
         local as = AP:GetAutoSwapSummary()
@@ -1927,7 +1942,7 @@ local function BuildSettingsTab(parent)
 
         local as = AP:GetAutoSwapSummary()
         PS.PaintBtn(srvAutoBtn, as.on == true and "green" or "dark")
-        srvAutoBtn.label:SetText("Автопогл.: " .. (as.on == true and "ВКЛ" or "ВЫКЛ"))
+        srvAutoBtn.label:SetText("Автопоглощение: " .. (as.on == true and "ВКЛ" or "ВЫКЛ"))
         PS.PaintBtn(srvBoeBtn, as.boeAllowed == true and "green" or "dark")
         srvBoeBtn.label:SetText("BoE: " .. (as.boeAllowed == true and "ДА" or "НЕТ"))
         if as.unlocked then
@@ -2067,7 +2082,7 @@ local function CreateMainWindow()
         { key = "summary", label = "Обзор и Дары", w = 122 },
         { key = "bags", label = "Сумки и Ковка", w = 126 },
         { key = "settings", label = "Настройки", w = 98 },
-        { key = "server", label = "Сервер и Боссы", w = 136 },
+        { key = "server", label = "События и Боссы", w = 142 },
     }
     f.tabBtns = {}
     f.tabPanels = {}
@@ -2250,9 +2265,9 @@ do
             if gift.active then
                 GameTooltip:AddLine("Дар недели: |cffa855f7" .. (gift.name or "?") .. "|r (" .. (gift.remText or "?") .. ")", 1, 1, 1)
             end
-            local bags = AP:GetOwnedUpgradeCandidates()
+            local bags = AP:GetOwnedUpgradeCandidates(nil, true)
             if #bags > 0 then
-                GameTooltip:AddLine("В сумках/Кладбоше к поглощению: |cff40ff40" .. #bags .. "|r", 1, 1, 1)
+                GameTooltip:AddLine("Вещей к поглощению/ковке: |cff40ff40" .. #bags .. "|r", 1, 1, 1)
             end
             local talLoaded, talTtpOn, talBridgeOn = false, true, AP:IsTalorianBridgeActive()
             if type(AP.GetTalorianStatus) == "function" then

@@ -9,7 +9,7 @@
 local AP = _G.AttuneParser or {}
 _G.AttuneParser = AP
 
-AP.VERSION = "1.1.0"
+AP.VERSION = "1.1.1"
 AP.Data = AP.Data or {}
 
 -- User-confirmed server tier defaults (replaced live when ASMSG_ATTUNE_TIERS arrives)
@@ -31,13 +31,13 @@ AP.MAX_TIER = 3
 AP.STAT_NAMES = {
     [4] = "Сила", [3] = "Ловкость", [7] = "Выносливость", [5] = "Интеллект", [6] = "Дух",
     [38] = "Сила атаки", [39] = "Сила атаки (дальн.)", [45] = "Сила заклинаний",
-    [32] = "Крит. удар", [19] = "Крит бл.", [20] = "Крит дальн.", [21] = "Крит закл.",
-    [36] = "Скорость", [28] = "Скорость бл.", [29] = "Скорость дальн.", [30] = "Скорость закл.",
-    [31] = "Меткость", [16] = "Меткость бл.", [17] = "Меткость дальн.", [18] = "Меткость закл.",
+    [32] = "Крит. удар", [19] = "Крит в ближнем бою", [20] = "Крит в дальнем бою", [21] = "Крит заклинаний",
+    [36] = "Скорость", [28] = "Скорость в ближнем бою", [29] = "Скорость дальнего боя", [30] = "Скорость заклинаний",
+    [31] = "Меткость", [16] = "Меткость в ближнем бою", [17] = "Меткость дальнего боя", [18] = "Меткость заклинаний",
     [37] = "Мастерство", [44] = "Пробивание брони", [35] = "Устойчивость",
-    [47] = "Проник. способн.", [43] = "Восст. маны", [46] = "Восст. здоровья",
+    [47] = "Проникающая способность", [43] = "Восстановление маны", [46] = "Восстановление здоровья",
     [12] = "Защита", [13] = "Уклонение", [14] = "Парирование",
-    [15] = "Рейт. блока", [48] = "Показ. блока",
+    [15] = "Рейтинг блока", [48] = "Показатель блока",
     [1000] = "Броня", [1] = "Здоровье",
 }
 
@@ -2441,14 +2441,34 @@ do
         return res
     end
 
-    function AP:GetOwnedUpgradeCandidates(zoneIdFilter)
+    function AP:GetOwnedUpgradeCandidates(zoneIdFilter, includeNeedsForge)
         local st = AP:GetBagItemsStatus(true)
         local zonePool = zoneIdFilter and GetZonePoolLookup(zoneIdFilter) or nil
         local topFilter = (zoneIdFilter and AP.Data and AP.Data.TopMap and AP.Data.TopMap[zoneIdFilter]) or zoneIdFilter
         local out = {}
-        for _, info in ipairs(st.readyToAbsorb) do
-            if (not zonePool) or zonePool[info.itemId] or info.primaryZone == topFilter then
-                table.insert(out, info)
+        local seenOwned = {}
+        local function AddBagStatusList(list)
+            for _, info in ipairs(list or {}) do
+                if (not zonePool) or zonePool[info.itemId] or info.primaryZone == topFilter then
+                    local okKey = (info.where or "") .. ":" .. tostring(info.bag or "") .. ":" .. tostring(info.slot or "") .. ":" .. tostring(info.itemId or 0)
+                    if not seenOwned[okKey] then
+                        seenOwned[okKey] = true
+                        if not info.canGainNow then
+                            info.needsForgeUpgrade = true
+                        end
+                        table.insert(out, info)
+                    end
+                end
+            end
+        end
+        AddBagStatusList(st.readyToAbsorb)
+        if includeNeedsForge then
+            for _, bucket in ipairs({ st.newItems, st.forgeItems }) do
+                for _, info in ipairs(bucket or {}) do
+                    if (not info.isCompleted) and (info.usableOnHero ~= false) then
+                        AddBagStatusList({ info })
+                    end
+                end
             end
         end
         local function PushExternal(whereLabel, bag, slot, dbId, eid, link, xTier, cntVal, dspReq)
@@ -2458,8 +2478,9 @@ do
             if not usable then return end
             local info = AP:GetItemInfo(eid, link)
             local pTier = xTier or 0
-            if info and (not info.isCompleted) and (pTier > info.doneTier) then
+            if info and (not info.isCompleted) and ((pTier > info.doneTier) or includeNeedsForge) then
                 local gPct = AP.TIER_PCT[pTier] or 20
+                local canNow = (pTier > info.doneTier)
                 info.where = whereLabel
                 info.bag = bag
                 info.slot = slot
@@ -2470,9 +2491,10 @@ do
                 info.instanceTier = pTier
                 info.instanceTierName = AP.TIER_NAMES[pTier] or ""
                 info.isBlacklisted = AP:IsItemBlacklisted(eid, pTier)
-                info.canGainNow = true
-                info.gainNowPct = math.max(0, gPct - (info.curPct or 0))
-                info.gainNowStats = math.floor((info.coreStatsSum or 0) * (info.gainNowPct / 100) + 0.5)
+                info.canGainNow = canNow
+                info.needsForgeUpgrade = not canNow
+                info.gainNowPct = canNow and math.max(0, gPct - (info.curPct or 0)) or 0
+                info.gainNowStats = canNow and math.floor((info.coreStatsSum or 0) * (info.gainNowPct / 100) + 0.5) or 0
                 table.insert(out, info)
             end
         end
@@ -2504,7 +2526,15 @@ do
             end
         end
         table.sort(out, function(a, b)
-            if (a.gainNowStats or 0) ~= (b.gainNowStats or 0) then return (a.gainNowStats or 0) > (b.gainNowStats or 0) end
+            local ra = a.canGainNow and 1 or 0
+            local rb = b.canGainNow and 1 or 0
+            if ra ~= rb then return ra > rb end
+            if ra == 1 and (a.gainNowStats or 0) ~= (b.gainNowStats or 0) then
+                return (a.gainNowStats or 0) > (b.gainNowStats or 0)
+            end
+            if (a.remainStats or 0) ~= (b.remainStats or 0) then
+                return (a.remainStats or 0) > (b.remainStats or 0)
+            end
             return (a.ilvl or 0) > (b.ilvl or 0)
         end)
         return out
@@ -3542,7 +3572,7 @@ do
         if (v[3] or 0) > 0 then table.insert(parts, "уже поглощено - " .. v[3]) end
         if (v[4] or 0) > 0 then table.insert(parts, "не на ваш класс - " .. v[4]) end
         if (v[5] or 0) > 0 then table.insert(parts, "нельзя поглотить - " .. v[5]) end
-        local t = "Расщепить ненужное в Кладбоше?\n\nБудет расщеплено: |cffffffff" .. n .. "|r предм."
+        local t = "Расщепить ненужное в хранилище сборщика?\n\nБудет расщеплено: |cffffffff" .. n .. "|r предм."
         if #parts > 0 then t = t .. "\n(" .. table.concat(parts, ", ") .. ")." end
         if n > 250 then t = t .. "\nЗа один запуск максимум 250 шт." end
         local skip = {}
@@ -3904,9 +3934,9 @@ do
             AP.petLootJunk.askPending = false
             if ask and not busy then
                 if v[9] ~= 1 then
-                    DEFAULT_CHAT_FRAME:AddMessage("|cffffd200[AttuneParser]|r Кладбоша еще проверяет поглощение. Попробуйте через пару секунд.")
+                    DEFAULT_CHAT_FRAME:AddMessage("|cffffd200[AttuneParser]|r Сборщик еще проверяет поглощение. Попробуйте через пару секунд.")
                 elseif (v[2] or 0) == 0 then
-                    DEFAULT_CHAT_FRAME:AddMessage("|cff38bdf8[AttuneParser]|r В Кладбоше нет ненужных вещей для расщепления.")
+                    DEFAULT_CHAT_FRAME:AddMessage("|cff38bdf8[AttuneParser]|r В хранилище сборщика нет ненужных вещей для расщепления.")
                 elseif StaticPopupDialogs and StaticPopup_Show then
                     StaticPopupDialogs["ATTUNEPARSER_PETLOOT_JUNK"] = {
                         text = BuildPetLootJunkText(v),
@@ -4227,7 +4257,7 @@ do
             local active, done, tot = AP:GetScanProgress()
             local acct = AP:GetAbsorbedAccountStats()
             DEFAULT_CHAT_FRAME:AddMessage(string.format(
-                "|cff38bdf8[AttuneParser]|r v%s | База: %d предм. | Тиры: %d%%/%d%%/%d%%/%d%% (%s) | Погл: %d | Скан: %s (%d/%d)",
+                "|cff38bdf8[AttuneParser]|r v%s | База: %d предм. | Тиры: %d%%/%d%%/%d%%/%d%% (%s) | Поглощено: %d | Скан: %s (%d/%d)",
                 AP.VERSION, bi.items or 0,
                 AP.TIER_PCT[0], AP.TIER_PCT[1], AP.TIER_PCT[2], AP.TIER_PCT[3], AP.TIER_SOURCE,
                 acct.statsCount or 0, active and "идет" or "пауза/готов", done, tot
@@ -4265,13 +4295,21 @@ do
             local n = AP:StartBackgroundScan()
             DEFAULT_CHAT_FRAME:AddMessage("|cff38bdf8[AttuneParser]|r Фоновый до-скан запущен (" .. n .. " предм. вне WDB).")
         elseif msg == "bags" then
-            local cands = AP:GetOwnedUpgradeCandidates()
-            DEFAULT_CHAT_FRAME:AddMessage(string.format("|cffffd200[AttuneParser] Вещи в сумках/банке/Кладбоше/экип. для поглощения: %d|r", #cands))
+            local cands = AP:GetOwnedUpgradeCandidates(nil, true)
+            DEFAULT_CHAT_FRAME:AddMessage(string.format("|cffffd200[AttuneParser] Ваши вещи для поглощения и ковки: %d|r", #cands))
+            local wMap = {
+                petloot = "Сборщик", itembank = "Банк вещей", bank = "Банк",
+                guild = "Гильдбанк", equip = "Надетые", bag = "Сумка",
+            }
             for i = 1, math.min(10, #cands) do
                 local it = cands[i]
-                local wLbl = (it.where == "petloot") and "Кладбоша" or (it.where or "bag")
-                local blTag = it.isBlacklisted and " |cffff6060[ЧС Автосвапа]|r" or ""
-                DEFAULT_CHAT_FRAME:AddMessage(string.format("  [%s] %s (%s -> +%d%%, +%d статов)%s", wLbl, it.name, it.instanceTierName or "?", it.gainNowPct or 0, it.gainNowStats or 0, blTag))
+                local wLbl = wMap[it.where or "bag"] or "Сумка"
+                local blTag = it.isBlacklisted and " |cffff6060[Черный список]|r" or ""
+                if it.canGainNow then
+                    DEFAULT_CHAT_FRAME:AddMessage(string.format("  [%s] %s (%s -> +%d%%, +%d статов)%s", wLbl, it.name, it.instanceTierName or "?", it.gainNowPct or 0, it.gainNowStats or 0, blTag))
+                else
+                    DEFAULT_CHAT_FRAME:AddMessage(string.format("  [%s] %s (нужна ковка, до 90%%: +%d статов)%s", wLbl, it.name, it.remainStats or 0, blTag))
+                end
             end
         elseif msg == "milestones" or msg == "ms" then
             local ms = AP:GetMilestonesSummary()

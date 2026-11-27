@@ -328,7 +328,8 @@ end
 AP_CORE_SHIM = r'''
 AttuneParserDB = AttuneParserDB or { settings = {} }
 local AP = {
-    VERSION = "1.1.0",
+    VERSION = "1.1.1",
+    _isShim = true,
     Data = { BuildInfo = { items = 18106 }, Zones = {}, TopMap = {}, Creatures = {} },
     TIER_PCT = { [0] = 20, [1] = 45, [2] = 75, [3] = 100 },
     TIER_NAMES = { [0] = "Обыч.", [1] = "Эпик", [2] = "Лег.", [3] = "Титан." },
@@ -382,7 +383,16 @@ function AP:IsTalorianBridgeActive()
     return false
 end
 function AP:CanHeroAbsorb() return true, true end
-function AP:GetItemInfo(eid) return { itemId = eid, name = "Test Chest", quality = 4, ilvl = 245, doneTier = -1, curPct = 0, coreStatsSum = 500, isCompleted = false } end
+function AP:GetItemInfo(eid)
+    local dt = -1
+    if type(rawget(_G, "CustomAttuneProgress")) == "function" then
+        local ok, d = pcall(_G.CustomAttuneProgress, eid, 0)
+        if ok and type(d) == "number" then dt = d end
+    end
+    local curPct = (dt >= 0) and (AP.TIER_PCT[dt] or 0) or 0
+    local remPct = math.max(0, 90 - curPct)
+    return { itemId = eid, name = "Test Chest", quality = 4, ilvl = 245, doneTier = dt, curPct = curPct, remainStats = math.floor(500 * (remPct / 100) + 0.5), coreStatsSum = 500, isCompleted = (dt >= 3), needsForge = (dt >= 0 and dt < 3) }
+end
 function AP:IsItemBlacklisted(eid, tier)
     if not AP.blacklist or not eid then return false end
     if AP.blacklist[eid .. ":-1"] then return true end
@@ -887,7 +897,7 @@ def run_tests():
     AP.autoSwap.groupMask = 22 -- Украш.(2) + Оруж.(4) + Дальн.(16), Броня(1) = OFF!
     AP:SetSetting("ibUseAAMask", true)
     local okAAM, rAAM = AP:RunItemBankAutoEquip(true)
-    assert(okAAM == false and rAAM:find("AAMASK", 1, true), "With ibUseAAMask=true and Броня OFF, should skip and report AAMASK, got: " .. tostring(rAAM))
+    assert(okAAM == false and rAAM:find("фильтр", 1, true), "With ibUseAAMask=true and Броня OFF, should skip and report filter, got: " .. tostring(rAAM))
     AP:SetSetting("ibUseAAMask", false)
 
     -- Test ASMSG_IB_WORN protects tier-2 forged chest even if AP.forgeEquip is empty (e.g. fresh /reload)
@@ -1361,7 +1371,7 @@ def run_tests():
 
     -- Before ItemProgressFrame opens, StartValdrisAutoUpgrade must refuse
     local okClosed, rClosed = AP:StartValdrisAutoUpgrade()
-    assert(okClosed == false and rClosed:find("Валдрис", 1, true), "Must not upgrade when Valdris window is closed! got: " .. tostring(rClosed))
+    assert(okClosed == false and rClosed:find("улучш", 1, true), "Must not upgrade when Progression window is closed! got: " .. tostring(rClosed))
 
     local _ipf = CreateFrame("Frame", "ItemProgressFrame")
     _ipf:Show()
@@ -1578,18 +1588,18 @@ def run_tests():
     -- Direct Bank/Equipped/Bag guards must refuse Mor'Kel 48640 without ACMSG_IB_TAKE, unequip, or slot selection!
     _G._SENT_ADDON = {}
     local okBkMk, rBkMk = AP:PickBankItemForValdris(8801, "item:48640:0:0:0:0:0:0", 0)
-    assert(okBkMk == false and tostring(rBkMk):find("Мор'Кел", 1, true) and #_G._SENT_ADDON == 0,
+    assert(okBkMk == false and tostring(rBkMk):find("другой мастер", 1, true) and #_G._SENT_ADDON == 0,
         "PickBankItemForValdris must refuse Mor'Kel 48640 before ACMSG_IB_TAKE! got=" .. tostring(rBkMk))
     local oldEq10 = MOCK_EQUIP[10]
     MOCK_EQUIP[10] = "item:48640:0:0:0:0:0:0"
     _dragReceived = nil
     local okEqMk, rEqMk = AP:PickEquippedItemForValdris(10)
-    assert(okEqMk == false and tostring(rEqMk):find("Мор'Кел", 1, true) and MOCK_EQUIP[10] == "item:48640:0:0:0:0:0:0" and _dragReceived == nil,
+    assert(okEqMk == false and tostring(rEqMk):find("другой мастер", 1, true) and MOCK_EQUIP[10] == "item:48640:0:0:0:0:0:0" and _dragReceived == nil,
         "PickEquippedItemForValdris must refuse equipped Mor'Kel 48640 without unequipping! got=" .. tostring(rEqMk))
     MOCK_EQUIP[10] = oldEq10
     _bag19[0][2] = "item:48640:0:0:0:0:0:0"
     local okBgMk, rBgMk = AP:PickBagItemForValdris(0, 2)
-    assert(okBgMk == false and tostring(rBgMk):find("Мор'Кел", 1, true) and _dragReceived == nil,
+    assert(okBgMk == false and tostring(rBgMk):find("другой мастер", 1, true) and _dragReceived == nil,
         "PickBagItemForValdris must refuse bag Mor'Kel 48640 on Progression tab! got=" .. tostring(rBgMk))
     _bag19[0][2] = nil
 
@@ -1909,6 +1919,78 @@ SUITE_21DE_LUA = r'''
     ipf21:Hide()
     _G.ItemProgressFrame = nil
     _G.GetItemInfo = _origGII21
+
+    -- 21g: Сумки и Ковка tab & GetOwnedUpgradeCandidates(..., true) show absorbed items awaiting forge (even when auto-absorb ON)
+    local _origGCS21, _origGCL21, _origCAIS21, _origGIL21 = _G.GetContainerNumSlots, _G.GetContainerItemLink, _G.CustomAttuneItemStatus, _G.GetInventoryItemLink
+    local _origCAP21, _origCAAT21, _origGII21g = _G.CustomAttuneProgress, _G.CustomAttuneAbsorbedTier, _G.GetItemInfo
+    AP.Data.Items = AP.Data.Items or {}
+    AP.Data.Items[88802] = "4|4|5|4|251|80|1000|1|0|100|-1|0|7:60,4:40|КованыйПоясТест"
+    _G.GetItemInfo = function(x)
+        local eid = tonumber(tostring(x):match("(%d+)"))
+        if eid == 88802 then return "КованыйПоясТест", "item:88802", 4, 251, 80, "Доспехи", "Латы", 1, "INVTYPE_WAIST", "tex", 1000 end
+        return _origGII21g(x)
+    end
+    _G.CustomAttuneProgress = function(eid, sfx)
+        if eid == 88802 then return 0, nil, 0, 0 end
+        if _origCAP21 then return _origCAP21(eid, sfx) end
+        return nil
+    end
+    _G.CustomAttuneAbsorbedTier = function(eid, sfx)
+        if eid == 88802 then return 0 end
+        if _origCAAT21 then return _origCAAT21(eid, sfx) end
+        return nil
+    end
+    _G.CustomAttuneItemStatus = function(eid, forge, sfx)
+        if eid == 88802 then return true, false, 100, true end
+        if _origCAIS21 then return _origCAIS21(eid, forge, sfx) end
+        return false, false, 0, true
+    end
+    _G.GetContainerNumSlots = function(b) return b == 0 and 2 or 0 end
+    _G.GetContainerItemLink = function(b, s) return (b == 0 and s == 1) and "|cffa335ee|Hitem:88802:0:0:0:0:0:0:0:80|h[КованыйПоясТест]|h|r" or nil end
+    _G.GetInventoryItemLink = function() return nil end
+    _G.PRIME_ItemBank.items = { { guid = 9952, entry = 88802, forge = 0, flags = 49, link = "item:88802:0:0:0:0:0:0" } }
+    _G.PRIME_ItemBank.byGuid = { [9952] = _G.PRIME_ItemBank.items[1] }
+    if AP.serverSync and AP.serverSync.ib then AP.serverSync.ib.items = _G.PRIME_ItemBank.items end
+    AP.forgeBag = { [0] = { [1] = 0 } }
+    AP:InvalidateCaches(true)
+    local strictC21 = AP:GetOwnedUpgradeCandidates(nil, false)
+    local uiC21 = AP:GetOwnedUpgradeCandidates(nil, true)
+    local sawStrict88802 = false
+    for _, c in ipairs(strictC21) do
+        if c.itemId == 88802 then sawStrict88802 = true end
+    end
+    local sawBag88802, sawIb88802 = false, false
+    for _, c in ipairs(uiC21) do
+        if c.itemId == 88802 and c.needsForgeUpgrade then
+            if c.where == "bag" then sawBag88802 = true end
+            if c.where == "itembank" then sawIb88802 = true end
+        end
+    end
+    assert((not sawStrict88802) and sawIb88802 and (AP._isShim or sawBag88802),
+        "21g: absorbed uncompleted item 88802 in bag & itembank must show under includeNeedsForge=true and hide in strict mode! sawStrict=" .. tostring(sawStrict88802))
+    AP:OpenUI("bags")
+    local bagsPanel = AttuneParserFrame and AttuneParserFrame.tabPanels and AttuneParserFrame.tabPanels.bags
+    local needMin = AP._isShim and 1 or 2
+    assert(bagsPanel and bagsPanel:IsShown() and #(bagsPanel.data or {}) >= needMin,
+        "21g: BuildBagsTab must populate rows for needsForge items! count=" .. tostring(bagsPanel and #(bagsPanel.data or {})))
+    local sawRow88802Stat = false
+    for _, rd in ipairs(bagsPanel.data or {}) do
+        if rd.itemId == 88802 and rd.needsForgeUpgrade then sawRow88802Stat = true end
+    end
+    local foundPotRow = false
+    for _, r in ipairs(bagsPanel.rows or {}) do
+        local stTxt = (r and r:IsShown() and r.statTxt and r.statTxt:GetText()) or ""
+        if stTxt:find("пот.", 1, true) then foundPotRow = true; break end
+    end
+    assert(sawRow88802Stat and foundPotRow, "21g: bagsPanel must display 88802 as needsForgeUpgrade with potential stats!")
+    _G.GetContainerNumSlots, _G.GetContainerItemLink, _G.CustomAttuneItemStatus, _G.GetInventoryItemLink, _G.GetItemInfo =
+        _origGCS21, _origGCL21, _origCAIS21, _origGIL21, _origGII21g
+    _G.CustomAttuneProgress, _G.CustomAttuneAbsorbedTier = _origCAP21, _origCAAT21
+    _G.PRIME_ItemBank.items = {}
+    _G.PRIME_ItemBank.byGuid = {}
+    if AP.serverSync and AP.serverSync.ib then AP.serverSync.ib.items = {} end
+    AP.forgeBag = {}
+    AP:InvalidateCaches(true)
     return "SUITE_21DE_PASSED"
 '''
 
@@ -2029,6 +2111,38 @@ def run_real_attune_parser_core_tests():
     local hdrTxt = AttuneParserFrame.subText:GetText()
     assert(type(hdrTxt) == "string" and hdrTxt:find("Выкл", 1, true) and not hdrTxt:find("Автономный режим", 1, true),
         "Header must show disabled-in-ttp instead of Автономный режим! got=" .. tostring(hdrTxt))
+
+    -- Test E (21g core): Core BuildBagsTab & GetOwnedUpgradeCandidates(nil, true) show forge-pending items when auto-absorb is ON
+    local _oGCS, _oGCL, _oCAIS, _oCAP, _oCAAT = _G.GetContainerNumSlots, _G.GetContainerItemLink, _G.CustomAttuneItemStatus, _G.CustomAttuneProgress, _G.CustomAttuneAbsorbedTier
+    _G.GetContainerNumSlots = function(b) return b == 0 and 2 or 0 end
+    _G.GetContainerItemLink = function(b, s) return (b == 0 and s == 1) and "|cffa335ee|Hitem:88801:0:0:0:0:0:0:0:80|h[ТестТяжКв]|h|r" or nil end
+    _G.CustomAttuneProgress = function(eid, sfx)
+        if eid == 88801 then return 0, nil, 0, 0 end
+        if _oCAP then return _oCAP(eid, sfx) end
+        return nil
+    end
+    _G.CustomAttuneAbsorbedTier = function(eid, sfx)
+        if eid == 88801 then return 0 end
+        if _oCAAT then return _oCAAT(eid, sfx) end
+        return nil
+    end
+    _G.CustomAttuneItemStatus = function(eid, forge, sfx)
+        if eid == 88801 then return true, false, 100, true end
+        return false, false, 0, true
+    end
+    AP.forgeBag = { [0] = { [1] = 0 } }
+    AP:InvalidateCaches(true)
+    local sc = AP:GetOwnedUpgradeCandidates(nil, false)
+    local uc = AP:GetOwnedUpgradeCandidates(nil, true)
+    assert(#sc == 0 and #uc == 1 and uc[1].itemId == 88801 and uc[1].needsForgeUpgrade == true,
+        "Core GetOwnedUpgradeCandidates(nil, true) must include forge-pending 88801! #sc=" .. #sc .. " #uc=" .. #uc)
+    AP:OpenUI("bags")
+    local bp = AttuneParserFrame and AttuneParserFrame.tabPanels and AttuneParserFrame.tabPanels.bags
+    assert(bp and #(bp.data or {}) == 1 and bp.rows[1].statTxt:GetText():find("пот.", 1, true),
+        "Core BuildBagsTab must display forge-pending bag item!")
+    _G.GetContainerNumSlots, _G.GetContainerItemLink, _G.CustomAttuneItemStatus, _G.CustomAttuneProgress, _G.CustomAttuneAbsorbedTier = _oGCS, _oGCL, _oCAIS, _oCAP, _oCAAT
+    AP.forgeBag = {}
+    AP:InvalidateCaches(true)
 
     return "REAL_AP_CORE_PASSED"
     ''')

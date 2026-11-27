@@ -1208,7 +1208,7 @@ do
                     if #parts > 0 then diffLine = "\nРежимы: " .. table.concat(parts, " | ") end
                 end
                 ov.statsTxt:SetText(string.format(
-                    "Новых: |cff40ff40%d|r (сразу +%d, макс +%d стат)\nКовка 90%%: |cffffd200%d|r (Погл:%d Эп:%d Лег:%d, +%d стат)\n1-lvl (req<=1): %d%s",
+                    "Новых: |cff40ff40%d|r (сразу +%d, макс +%d стат)\nКовка 90%%: |cffffd200%d|r (Обычн:%d Эпик:%d Лег:%d, +%d стат)\n1-lvl (req<=1): %d%s",
                     za.newCount or 0, za.newImmediateStats or 0, za.newMaxStats or 0,
                     za.forgeCount or 0, fb[0] or 0, fb[1] or 0, fb[2] or 0, za.forgeRemainStats or 0,
                     za.noReqCount or 0, diffLine
@@ -1226,17 +1226,17 @@ do
 
                 local rowData = {}
                 local EJ_WHERE_TAG = {
-                    petloot = "|cffff80ff[Клад]|r ",
-                    itembank = "|cff38bdf8[ИБ]|r ",
+                    petloot = "|cffff80ff[Сборщик]|r ",
+                    itembank = "|cff38bdf8[Банк вещ.]|r ",
                     bank = "|cffffd200[Банк]|r ",
-                    guild = "|cffa335ee[ГБ]|r ",
-                    equip = "|cffffffff[Экип]|r ",
+                    guild = "|cffa335ee[Гильдбанк]|r ",
+                    equip = "|cffffffff[Надетые]|r ",
                 }
                 local owned = AP:GetOwnedUpgradeCandidates(ctx.zoneId)
                 for _, oit in ipairs(owned) do
                     if #rowData >= 9 then break end
                     local dPre = FormatDiffPrefix(oit.itemId, ctx.zoneId, oit.diffMask)
-                    local wTag = EJ_WHERE_TAG[oit.where or ""] or "|cff40ff40[Сумк]|r "
+                    local wTag = EJ_WHERE_TAG[oit.where or ""] or "|cff40ff40[Сумки]|r "
                     table.insert(rowData, {
                         kind = "item",
                         itemId = oit.itemId,
@@ -1898,7 +1898,7 @@ do
             if c.isNew then newCnt = newCnt + 1 end
         end
         if #cands > 0 then
-            aucBtn.label:SetText(string.format("Погл: |cff40ff40%d|r", #cands))
+            aucBtn.label:SetText(string.format("Лоты: |cff40ff40%d|r", #cands))
         else
             aucBtn.label:SetText("Поглощение")
         end
@@ -2808,13 +2808,32 @@ do
 
     local origOwned = AP.GetOwnedUpgradeCandidates
     if type(origOwned) == "function" then
-        function AP:GetOwnedUpgradeCandidates(zoneIdFilter)
-            local out = origOwned(self, zoneIdFilter)
+        function AP:GetOwnedUpgradeCandidates(zoneIdFilter, includeNeedsForge)
+            -- Ensure equipped forge tiers from item bank worn state are reflected before scanning slots
+            local pib = rawget(_G, "PRIME_ItemBank")
+            local wornTbl = (type(SS.ib.worn) == "table" and next(SS.ib.worn) ~= nil and SS.ib.worn) or nil
+            if wornTbl or (type(pib) == "table" and type(pib.worn) == "table") then
+                AP.forgeEquip = AP.forgeEquip or {}
+                for slot = 1, 18 do
+                    if AP.forgeEquip[slot] == nil then
+                        local wt = (wornTbl and wornTbl[slot]) or (pib and pib.worn and pib.worn[slot - 1])
+                        if type(wt) == "number" and wt >= 0 then
+                            AP.forgeEquip[slot] = wt
+                        end
+                    end
+                end
+            end
+
+            local out = origOwned(self, zoneIdFilter, includeNeedsForge)
             local hasBank = false
             local seenKey = {}
             for _, row in ipairs(out) do
                 if row.where == "bank" then hasBank = true end
-                seenKey[(row.where or "") .. ":" .. (row.itemId or 0) .. ":" .. (row.instanceTier or 0)] = true
+                if row.where == "itembank" and row.guid then
+                    seenKey["itembank:g:" .. row.guid] = true
+                else
+                    seenKey[(row.where or "") .. ":" .. (row.itemId or 0) .. ":" .. (row.instanceTier or 0)] = true
+                end
             end
 
             local topFilter = (zoneIdFilter and AP.Data and AP.Data.TopMap and AP.Data.TopMap[zoneIdFilter]) or zoneIdFilter
@@ -2825,7 +2844,7 @@ do
                 if not info or info.isCompleted then return end
                 pTier = tonumber(pTier) or 0
                 local doneTier = (info.doneTier ~= nil) and info.doneTier or -1
-                if pTier <= doneTier then return end
+                if (not includeNeedsForge) and pTier <= doneTier then return end
                 if zoneIdFilter and info.primaryZone ~= topFilter and info.primaryZone ~= zoneIdFilter then return end
                 local dupK = whereLabel .. ":" .. eid .. ":" .. pTier
                 if guid then dupK = whereLabel .. ":g:" .. guid end
@@ -2833,6 +2852,7 @@ do
                 seenKey[dupK] = true
 
                 local gPct = (AP.TIER_PCT and AP.TIER_PCT[pTier]) or 20
+                local canNow = pTier > doneTier
                 info.where = whereLabel
                 info.guid = guid
                 info.count = cntVal or 1
@@ -2841,9 +2861,10 @@ do
                 info.instanceTier = pTier
                 info.instanceTierName = (AP.TIER_NAMES and AP.TIER_NAMES[pTier]) or ""
                 info.isBlacklisted = AP:IsItemBlacklisted(eid, pTier)
-                info.canGainNow = true
-                info.gainNowPct = math_max(0, gPct - (info.curPct or 0))
-                info.gainNowStats = math_floor((info.coreStatsSum or 0) * (info.gainNowPct / 100) + 0.5)
+                info.canGainNow = canNow
+                info.needsForgeUpgrade = not canNow
+                info.gainNowPct = canNow and math_max(0, gPct - (info.curPct or 0)) or 0
+                info.gainNowStats = canNow and math_floor((info.coreStatsSum or 0) * (info.gainNowPct / 100) + 0.5) or 0
                 out[#out + 1] = info
             end
 
@@ -2869,8 +2890,14 @@ do
             end
 
             table.sort(out, function(a, b)
-                if (a.gainNowStats or 0) ~= (b.gainNowStats or 0) then
+                local ra = a.canGainNow and 1 or 0
+                local rb = b.canGainNow and 1 or 0
+                if ra ~= rb then return ra > rb end
+                if ra == 1 and (a.gainNowStats or 0) ~= (b.gainNowStats or 0) then
                     return (a.gainNowStats or 0) > (b.gainNowStats or 0)
+                end
+                if (a.remainStats or 0) ~= (b.remainStats or 0) then
+                    return (a.remainStats or 0) > (b.remainStats or 0)
                 end
                 return (a.ilvl or 0) > (b.ilvl or 0)
             end)
@@ -2899,7 +2926,7 @@ do
                 local sum = AP:GetItemBankEquipSummary(true)
                 if DEFAULT_CHAT_FRAME then
                     DEFAULT_CHAT_FRAME:AddMessage(string.format(
-                        "|cff38bdf8[AttuneParser]|r Автоэкип из Банка предметов: %s | В ИБ: %d шт., подходящих сейчас: %d",
+                        "|cff38bdf8[AttuneParser]|r Автонадевание из Банка вещей: %s | В банке: %d шт., подходящих сейчас: %d",
                         want and "|cff40ff40ВКЛ|r" or "|cffff6060ВЫКЛ|r",
                         sum.itemCount or 0, sum.eligibleCount or 0
                     ))
@@ -2910,11 +2937,11 @@ do
                 if DEFAULT_CHAT_FRAME then
                     if ok and type(cand) == "table" then
                         DEFAULT_CHAT_FRAME:AddMessage(string.format(
-                            "|cff38bdf8[AttuneParser]|r Надет предмет из ИБ: %s (ilvl %d)",
+                            "|cff38bdf8[AttuneParser]|r Надет предмет из Банка вещей: %s (ilvl %d)",
                             cand.link or cand.name or ("#" .. tostring(cand.entry)), cand.ilvl or 0
                         ))
                     else
-                        DEFAULT_CHAT_FRAME:AddMessage("|cff38bdf8[AttuneParser]|r ИБ-экип: " .. tostring(reason or "нет подходящих"))
+                        DEFAULT_CHAT_FRAME:AddMessage("|cff38bdf8[AttuneParser]|r Автонадевание: " .. tostring(reason or "нет подходящих"))
                     end
                 end
                 return
@@ -2927,7 +2954,7 @@ do
                 local psum = AP:GetItemBankPutSummary(true)
                 if DEFAULT_CHAT_FRAME then
                     DEFAULT_CHAT_FRAME:AddMessage(string.format(
-                        "|cff38bdf8[AttuneParser]|r Автосклад в Банк предметов: %s | Режим: %s | Готово к переносу: %d",
+                        "|cff38bdf8[AttuneParser]|r Автосклад в Банк вещей: %s | Режим: %s | Готово к переносу: %d",
                         want and "|cff40ff40ВКЛ|r" or "|cffff6060ВЫКЛ|r",
                         tostring(psum.modeLabel or "?"),
                         psum.eligibleCount or 0
@@ -2937,16 +2964,16 @@ do
             elseif norm == "ibputmode" then
                 local nm, lbl = AP:CycleItemBankPutMode()
                 if DEFAULT_CHAT_FRAME then
-                    DEFAULT_CHAT_FRAME:AddMessage("|cff38bdf8[AttuneParser]|r Режим автосклада ИБ: " .. tostring(lbl or nm))
+                    DEFAULT_CHAT_FRAME:AddMessage("|cff38bdf8[AttuneParser]|r Режим автосклада в Банк вещей: " .. tostring(lbl or nm))
                 end
                 return
             elseif norm == "ibput" then
                 local ok, reason, cand = AP:RunItemBankAutoPut(true)
                 if DEFAULT_CHAT_FRAME then
                     if ok and type(cand) == "table" then
-                        DEFAULT_CHAT_FRAME:AddMessage("|cff38bdf8[AttuneParser]|r Положено в ИБ: " .. tostring(cand.link or cand.name or cand.eid))
+                        DEFAULT_CHAT_FRAME:AddMessage("|cff38bdf8[AttuneParser]|r Положено в Банк вещей: " .. tostring(cand.link or cand.name or cand.eid))
                     else
-                        DEFAULT_CHAT_FRAME:AddMessage("|cff38bdf8[AttuneParser]|r ИБ-склад: " .. tostring(reason or "нет подходящих"))
+                        DEFAULT_CHAT_FRAME:AddMessage("|cff38bdf8[AttuneParser]|r Автосклад: " .. tostring(reason or "нет подходящих"))
                     end
                 end
                 return
@@ -2966,11 +2993,11 @@ do
                     local sp = AP:GetItemBankSplitPlan(true)
                     if DEFAULT_CHAT_FRAME then
                         if not sp.available then
-                            DEFAULT_CHAT_FRAME:AddMessage("|cff38bdf8[AttuneParser]|r ИБ-сплит недоступен: " .. tostring(sp.reason or "?"))
+                            DEFAULT_CHAT_FRAME:AddMessage("|cff38bdf8[AttuneParser]|r Расщепление дублей недоступно: " .. tostring(sp.reason or "?"))
                         elseif (sp.totalCount or 0) == 0 then
-                            DEFAULT_CHAT_FRAME:AddMessage(string.format("|cff38bdf8[AttuneParser]|r В ИБ нет лишних поглощенных вещей для расщепления (оставлено под ковку: %d).", sp.keptForge or 0))
+                            DEFAULT_CHAT_FRAME:AddMessage(string.format("|cff38bdf8[AttuneParser]|r В Банке вещей нет лишних поглощенных вещей для расщепления (оставлено под ковку: %d).", sp.keptForge or 0))
                         else
-                            DEFAULT_CHAT_FRAME:AddMessage(string.format("|cff38bdf8[AttuneParser]|r К расщеплению в ИБ: %d шт. (%d групп, пакетно=%s; под ковку оставлено: %d). Запуск: /ap ibsplit go | стоп: /ap ibsplit stop",
+                            DEFAULT_CHAT_FRAME:AddMessage(string.format("|cff38bdf8[AttuneParser]|r К расщеплению в Банке вещей: %d шт. (%d групп, пакетно=%s; под ковку оставлено: %d). Запуск: /ap ibsplit go | стоп: /ap ibsplit stop",
                                 sp.totalCount or 0, sp.groupCount or 0, sp.dspBatch and "да" or "нет", sp.keptForge or 0))
                         end
                     end
@@ -2983,25 +3010,25 @@ do
                 elseif norm == "valdris go" and type(AP.StartValdrisAutoUpgrade) == "function" then
                     local ok, reason = AP:StartValdrisAutoUpgrade()
                     if not ok and DEFAULT_CHAT_FRAME then
-                        DEFAULT_CHAT_FRAME:AddMessage("|cff38bdf8[AttuneParser]|r Валдрис: " .. tostring(reason or "недоступно"))
+                        DEFAULT_CHAT_FRAME:AddMessage("|cff38bdf8[AttuneParser]|r Прогрессия: " .. tostring(reason or "недоступно"))
                     end
                     return
                 elseif norm == "valdris auto" and type(AP.SetValdrisAutoOpen) == "function" then
                     local nv = AP:SetValdrisAutoOpen(not (AP:GetSetting("valdrisAutoOpen") == true))
                     if DEFAULT_CHAT_FRAME then
-                        DEFAULT_CHAT_FRAME:AddMessage("|cff38bdf8[AttuneParser]|r Авто-старт при открытии Валдриса: " .. (nv and "|cff40ff40ВКЛ|r" or "|cffff6060ВЫКЛ|r"))
+                        DEFAULT_CHAT_FRAME:AddMessage("|cff38bdf8[AttuneParser]|r Авто-старт при открытии окна улучшения: " .. (nv and "|cff40ff40ВКЛ|r" or "|cffff6060ВЫКЛ|r"))
                     end
                     return
                 elseif norm == "valdris eq" and type(AP.SetValdrisIncludeEquipped) == "function" then
                     local nv = AP:SetValdrisIncludeEquipped(not (AP:GetSetting("valdrisIncludeEquipped") == true))
                     if DEFAULT_CHAT_FRAME then
-                        DEFAULT_CHAT_FRAME:AddMessage("|cff38bdf8[AttuneParser]|r Снимать надетые для авто-апа: " .. (nv and "|cff40ff40ВКЛ|r" or "|cffff6060ВЫКЛ|r"))
+                        DEFAULT_CHAT_FRAME:AddMessage("|cff38bdf8[AttuneParser]|r Снимать надетые для автоулучшения: " .. (nv and "|cff40ff40ВКЛ|r" or "|cffff6060ВЫКЛ|r"))
                     end
                     return
                 elseif norm == "valdris bank" and type(AP.SetValdrisIncludeBank) == "function" then
                     local nv = AP:SetValdrisIncludeBank(not (AP:GetSetting("valdrisIncludeBank") ~= false))
                     if DEFAULT_CHAT_FRAME then
-                        DEFAULT_CHAT_FRAME:AddMessage("|cff38bdf8[AttuneParser]|r Брать из Банка предметов для авто-апа: " .. (nv and "|cff40ff40ВКЛ|r" or "|cffff6060ВЫКЛ|r"))
+                        DEFAULT_CHAT_FRAME:AddMessage("|cff38bdf8[AttuneParser]|r Брать из Банка вещей для автоулучшения: " .. (nv and "|cff40ff40ВКЛ|r" or "|cffff6060ВЫКЛ|r"))
                     end
                     return
                 elseif norm:sub(1, 11) == "valdris max" and type(AP.SetValdrisMaxTier) == "function" then
@@ -3009,7 +3036,7 @@ do
                     if tNum and tNum >= 1 and tNum <= 3 then
                         local nt = AP:SetValdrisMaxTier(tNum)
                         if DEFAULT_CHAT_FRAME then
-                            DEFAULT_CHAT_FRAME:AddMessage("|cff38bdf8[AttuneParser]|r Валдрис макс. ступень: " .. tostring(nt))
+                            DEFAULT_CHAT_FRAME:AddMessage("|cff38bdf8[AttuneParser]|r Макс. ступень улучшения: " .. tostring(nt))
                         end
                     end
                     return
@@ -3017,7 +3044,7 @@ do
                     local vs = AP:GetValdrisUpgradeSummary(true)
                     if DEFAULT_CHAT_FRAME then
                         DEFAULT_CHAT_FRAME:AddMessage(string.format(
-                            "|cff38bdf8[AttuneParser]|r Валдрис: окно=%s | готово=%d | цель<=%d | авто=%s | банкИБ=%s | надетые=%s | /ap valdris go | stop | bank | eq",
+                            "|cff38bdf8[AttuneParser]|r Прогрессия: окно=%s | готово=%d | цель<=%d | авто=%s | Банк вещей=%s | надетые=%s | /ap valdris go | stop | bank | eq",
                             vs.windowOpen and "|cff40ff40откр.|r" or "|cffff6060закр.|r",
                             vs.eligibleCount or 0, vs.maxTier or 3, vs.autoOpen and "ВКЛ" or "ВЫКЛ", vs.includeBank and "ВКЛ" or "ВЫКЛ", vs.includeEquipped and "ВКЛ" or "ВЫКЛ"
                         ))
@@ -3889,8 +3916,8 @@ do
         if manual then
             local st = plan.stats or {}
             local parts = {}
-            if (st.busySlot or 0) > 0 then parts[#parts + 1] = "слоты заняты непоглощ. вещами (" .. st.busySlot .. ")" end
-            if (st.blockedSlot or 0) > 0 then parts[#parts + 1] = "откл. в AAMASK (" .. st.blockedSlot .. ")" end
+            if (st.busySlot or 0) > 0 then parts[#parts + 1] = "слоты заняты непоглощенными вещами (" .. st.busySlot .. ")" end
+            if (st.blockedSlot or 0) > 0 then parts[#parts + 1] = "отключено фильтром слотов (" .. st.blockedSlot .. ")" end
             if (st.boe or 0) > 0 then parts[#parts + 1] = "скрыто BoE (" .. st.boe .. ")" end
             if (st.qual or 0) > 0 then parts[#parts + 1] = "фильтр качества (" .. st.qual .. ")" end
             if #parts > 0 then
@@ -4032,7 +4059,7 @@ do
                 if code and code ~= 0 then
                     SS.valdris.lastError = (text and text ~= "") and text or ("Код " .. tostring(code))
                     if DEFAULT_CHAT_FRAME then
-                        DEFAULT_CHAT_FRAME:AddMessage("|cffff8040[Валдрис]|r Не удалось вернуть в Банк предметов: " .. tostring(text or code))
+                        DEFAULT_CHAT_FRAME:AddMessage("|cffff8040[Прогрессия]|r Не удалось вернуть в Банк вещей: " .. tostring(text or code))
                     end
                 end
                 if type(SS.valdrisRefreshBar) == "function" then SS.valdrisRefreshBar() end
@@ -4068,7 +4095,7 @@ do
                     end
                     SS.valdris.lastError = (text and text ~= "") and text or ("Код " .. tostring(code))
                     if DEFAULT_CHAT_FRAME then
-                        DEFAULT_CHAT_FRAME:AddMessage("|cffff8040[Валдрис]|r Не удалось забрать из Банка предметов: " .. tostring(text or code))
+                        DEFAULT_CHAT_FRAME:AddMessage("|cffff8040[Прогрессия]|r Не удалось забрать из Банка вещей: " .. tostring(text or code))
                     end
                     if type(SS.valdrisRefreshBar) == "function" then SS.valdrisRefreshBar() end
                     if SS.valdris.running and type(AP.ScheduleValdrisStep) == "function" then
@@ -4100,7 +4127,7 @@ do
                 ibEq.inFlightGuid = nil
                 if DEFAULT_CHAT_FRAME and not ibEq.combatNotified then
                     ibEq.combatNotified = true
-                    DEFAULT_CHAT_FRAME:AddMessage("|cffffd200[AttuneParser]|r ИБ в бою отклонен (" .. tostring(text or code) .. ") - пробую надевать из сумок / до конца боя.")
+                    DEFAULT_CHAT_FRAME:AddMessage("|cffffd200[AttuneParser]|r Банк вещей в бою отклонен (" .. tostring(text or code) .. ") - пробую надевать из сумок / до конца боя.")
                 end
             elseif ibEq.inFlightGuid then
                 ibEq.failUntil[ibEq.inFlightGuid] = now + 30
@@ -4785,27 +4812,27 @@ function AP.BuildServerSyncTab(parent)
         end
     end
 
-    -- Left Column: AutoAbsorb + AutoSell server settings
+    -- Left Column: AutoAbsorb + AutoSell settings
     local lHdr1 = leftCard:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     lHdr1:SetPoint("TOPLEFT", 10, -8)
-    lHdr1:SetText("|cffffd200Серверное автопоглощение (ACMSG_AA*)|r")
+    lHdr1:SetText("|cffffd200Автоматическое поглощение|r")
 
     local updaters = {}
     local function AddUpd(fn, isSell)
         updaters[#updaters + 1] = { fn = fn, isSell = isSell }
     end
 
-    AddUpd(MakeCheck(leftCard, 10, -28, 148, "Автоэкип (ВКЛ)", function()
+    AddUpd(MakeCheck(leftCard, 10, -28, 152, "Автоэкипировка", function()
         return AP:GetAutoSwapSummary().on == true
     end, function()
         AP:SetAutoAbsorb(not (AP:GetAutoSwapSummary().on == true))
-    end, "Включает/выключает серверный авто-подбор и надевание вещей на поглощение."))
+    end, "Включает или выключает автоматический подбор и надевание вещей для поглощения."))
 
     AddUpd(MakeCheck(leftCard, 166, -28, 150, "Разрешить BoE", function()
         return AP:GetAutoSwapSummary().boeAllowed == true
     end, function()
         AP:SetAutoAbsorbBoE(not (AP:GetAutoSwapSummary().boeAllowed == true))
-    end, "Разрешает автосвапу надевать не персональные (BoE) вещи из сумок."))
+    end, "Разрешает надевать не персональные (BoE) вещи из сумок."))
 
     AddUpd(MakeCheck(leftCard, 10, -48, 300, "Порядок: сначала худшие по качеству/ilvl", function()
         return AP:GetAutoSwapSummary().orderWorst == true
@@ -4815,9 +4842,9 @@ function AP.BuildServerSyncTab(parent)
 
     local grpLbl = leftCard:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     grpLbl:SetPoint("TOPLEFT", 10, -72)
-    grpLbl:SetText("|cffb0a080Слоты (AAMASK):|r")
+    grpLbl:SetText("|cffb0a080Какие слоты проверять:|r")
 
-    local grps = { {1, 0, "Броня"}, {2, 1, "Украш."}, {4, 2, "Оруж."}, {8, 3, "Лев.р."}, {16, 4, "Дальн."} }
+    local grps = { {1, 0, "Броня"}, {2, 1, "Украшения"}, {4, 2, "Оружие"}, {8, 3, "Левая рука"}, {16, 4, "Дальний бой"} }
     for i, g in ipairs(grps) do
         local col = ((i - 1) % 3)
         local row = math_floor((i - 1) / 3)
@@ -4830,9 +4857,9 @@ function AP.BuildServerSyncTab(parent)
 
     local qualLbl = leftCard:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     qualLbl:SetPoint("TOPLEFT", 10, -132)
-    qualLbl:SetText("|cffb0a080Качество автопоглощения (AAQUAL):|r")
+    qualLbl:SetText("|cffb0a080Качество автопоглощения:|r")
 
-    local aaQuals = { {4, "|cff1eff00Зелен.|r"}, {8, "|cff0070ddСиние|r"}, {16, "|cffa335eeЭпик|r"}, {32, "|cffff8000Лег.|r"} }
+    local aaQuals = { {4, "|cff1eff00Зеленые|r"}, {8, "|cff0070ddСиние|r"}, {16, "|cffa335eeЭпик|r"}, {32, "|cffff8000Легенд.|r"} }
     for i, qd in ipairs(aaQuals) do
         AddUpd(MakeCheck(leftCard, 10 + (i - 1) * 76, -148, 74, qd[2], function()
             local m = AP:GetAutoSwapSummary().qualMask or 60
@@ -4844,9 +4871,9 @@ function AP.BuildServerSyncTab(parent)
 
     local lHdr2 = leftCard:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     lHdr2:SetPoint("TOPLEFT", 10, -170)
-    lHdr2:SetText("|cffffd200Авто-продажа поглощенных (ACMSG_AS*)|r")
+    lHdr2:SetText("|cffffd200Автопродажа освоенных дублей|r")
 
-    AddUpd(MakeCheck(leftCard, 10, -190, 148, "Автопродажа ВКЛ", function()
+    AddUpd(MakeCheck(leftCard, 10, -190, 148, "Автопродажа", function()
         return AP:GetAutoSwapSummary().active == true
     end, function()
         AP:SetAutoSellActive(not (AP:GetAutoSwapSummary().active == true))
@@ -4860,11 +4887,11 @@ function AP.BuildServerSyncTab(parent)
 
     local asQualLbl = leftCard:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     asQualLbl:SetPoint("TOPLEFT", 10, -214)
-    asQualLbl:SetText("|cffb0a080Качество для авто-продажи:|r")
+    asQualLbl:SetText("|cffb0a080Качество для автопродажи:|r")
 
     local asQuals = {
-        {1, "|cff9d9d9dСерый|r"}, {2, "|cffffffffБелый|r"}, {4, "|cff1eff00Зелен.|r"},
-        {8, "|cff0070ddСиний|r"}, {16, "|cffa335eeЭпик|r"}, {32, "|cffff8000Лег.|r"},
+        {1, "|cff9d9d9dСерый|r"}, {2, "|cffffffffБелый|r"}, {4, "|cff1eff00Зеленый|r"},
+        {8, "|cff0070ddСиний|r"}, {16, "|cffa335eeЭпик|r"}, {32, "|cffff8000Легенд.|r"},
     }
     for i, qd in ipairs(asQuals) do
         local col = ((i - 1) % 3)
@@ -4893,19 +4920,19 @@ function AP.BuildServerSyncTab(parent)
         AP:SetAutoSellSrcBit(2)
     end), true)
 
-    AddUpd(MakeCheck(leftCard, 10, -314, 134, "Автоэкип ИБ+сум", function()
+    AddUpd(MakeCheck(leftCard, 10, -314, 122, "Автонадевание", function()
         return AP:GetSetting("ibAutoEquip") == true
     end, function()
         AP:SetItemBankAutoEquip(not (AP:GetSetting("ibAutoEquip") == true))
-    end, "Надевает непоглощенные вещи из Банка предметов и из сумок (если слоты свободны/поглощены), с фильтрами качества/BoE и паузой 15с после ручного свапа."))
+    end, "Надевает непоглощенные вещи из Банка вещей и сумок (если слоты свободны или уже освоены), с паузой 15 сек после ручной замены."))
 
-    AddUpd(MakeCheck(leftCard, 146, -314, 64, "В бою", function()
+    AddUpd(MakeCheck(leftCard, 134, -314, 68, "В бою", function()
         return AP:GetSetting("ibEquipInCombat") == true
     end, function()
         AP:SetSetting("ibEquipInCombat", not (AP:GetSetting("ibEquipInCombat") == true))
-    end, "Меняет вещи из ИБ и сумок прямо во время боя по мере поглощения (если ИБ в бою отказан сервером - пробует сумки)."))
+    end, "Меняет вещи из Банка вещей и сумок прямо во время боя по мере поглощения."))
 
-    AddUpd(MakeCheck(leftCard, 212, -314, 106, "Сл. AAMASK", function()
+    AddUpd(MakeCheck(leftCard, 204, -314, 114, "Фильтр слотов", function()
         return AP:GetSetting("ibUseAAMask") == true
     end, function()
         local nw = not (AP:GetSetting("ibUseAAMask") == true)
@@ -4913,15 +4940,15 @@ function AP.BuildServerSyncTab(parent)
         if AP:GetSetting("ibAutoEquip") == true then
             AP:ScheduleItemBankAutoEquip(0.25)
         end
-    end, "ВЫКЛ (по умолч.): автоэкип ИБ+сумок использует ВСЕ надеваемые слоты. ВКЛ: только слоты AAMASK выше."))
+    end, "ВЫКЛ (по умолчанию): автонадевание проверяет все слоты экипировки. ВКЛ: только отмеченные выше слоты."))
 
-    AddUpd(MakeCheck(leftCard, 10, -334, 132, "Автосклад ИБ", function()
+    AddUpd(MakeCheck(leftCard, 10, -334, 132, "Автосклад", function()
         return AP:GetSetting("ibAutoPut") == true
     end, function()
         AP:SetItemBankAutoPut(not (AP:GetSetting("ibAutoPut") == true))
-    end, "Автоматически переносит непоглощенные вещи из сумок в Банк предметов (ACMSG_IB_PUT), оставляя в сумках поглощенные вещи под апгрейд ковки, вендора и комплекты."))
+    end, "Автоматически переносит лишние вещи из сумок в Банк вещей, оставляя предметы под ковку, продажу и комплекты."))
 
-    local ibPutModeBtn = PS.MakeBtn(leftCard, 170, 19, "Режим: Непогл.", "dark")
+    local ibPutModeBtn = PS.MakeBtn(leftCard, 170, 19, "Режим: Неосвоенные", "dark")
     ibPutModeBtn:SetPoint("TOPLEFT", leftCard, "TOPLEFT", 146, -334)
     ibPutModeBtn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
     ibPutModeBtn:SetScript("OnClick", function(_, mBtn)
@@ -4929,9 +4956,9 @@ function AP.BuildServerSyncTab(parent)
             local ok, reason, cand = AP:RunItemBankAutoPut(true)
             if DEFAULT_CHAT_FRAME then
                 if ok and cand then
-                    DEFAULT_CHAT_FRAME:AddMessage("|cff38bdf8[AttuneParser]|r Положено в ИБ: " .. tostring(cand.link or cand.name or cand.eid))
+                    DEFAULT_CHAT_FRAME:AddMessage("|cff38bdf8[AttuneParser]|r Положено в Банк вещей: " .. tostring(cand.link or cand.name or cand.eid))
                 else
-                    DEFAULT_CHAT_FRAME:AddMessage("|cff38bdf8[AttuneParser]|r ИБ-склад: " .. tostring(reason or "нет подходящих"))
+                    DEFAULT_CHAT_FRAME:AddMessage("|cff38bdf8[AttuneParser]|r Автосклад: " .. tostring(reason or "нет подходящих вещей"))
                 end
             end
         else
@@ -4942,11 +4969,11 @@ function AP.BuildServerSyncTab(parent)
     ibPutModeBtn:SetScript("OnEnter", function(self)
         local ps = AP:GetItemBankPutSummary(true)
         GameTooltip:SetOwner(self, "ANCHOR_TOP")
-        GameTooltip:SetText("Режим автосклада в Банк предметов")
+        GameTooltip:SetText("Режим автосклада в Банк вещей")
         GameTooltip:AddLine("ЛКМ: сменить режим (" .. tostring(ps.modeLabel or "?") .. ").", 1, 0.85, 0.2, true)
         GameTooltip:AddLine(tostring(ps.modeDesc or ""), 0.9, 0.9, 0.9, true)
-        GameTooltip:AddLine(string.format("Готово в сумках к переносу: %d | Оставлено под ковку/вендора: %d", ps.eligibleCount or 0, ps.keptUpgrade or 0), 0.7, 0.85, 1.0, true)
-        GameTooltip:AddLine("ПКМ: положить 1 подходящую вещь в ИБ прямо сейчас.", 0.4, 1.0, 0.4, true)
+        GameTooltip:AddLine(string.format("Готово к переносу: %d | Оставлено под ковку/торговца: %d", ps.eligibleCount or 0, ps.keptUpgrade or 0), 0.7, 0.85, 1.0, true)
+        GameTooltip:AddLine("ПКМ: положить 1 подходящую вещь прямо сейчас.", 0.4, 1.0, 0.4, true)
         GameTooltip:Show()
     end)
     ibPutModeBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -4956,7 +4983,7 @@ function AP.BuildServerSyncTab(parent)
     sweepNowBtn:SetScript("OnClick", function()
         if StaticPopupDialogs and StaticPopup_Show then
             StaticPopupDialogs["ATTUNEPARSER_SWEEP_SRV"] = {
-                text = "Продать СЕЙЧАС поглощенные вещи по фильтрам сервера?",
+                text = "Продать СЕЙЧАС освоенные дубликаты по выбранным фильтрам?",
                 button1 = YES or "Да",
                 button2 = NO or "Нет",
                 timeout = 0, whileDead = 1, hideOnEscape = 1,
@@ -4968,7 +4995,7 @@ function AP.BuildServerSyncTab(parent)
         end
     end)
 
-    local unlockBtn = PS.MakeBtn(leftCard, 148, 24, "Разблок. (30 мод.)", "dark")
+    local unlockBtn = PS.MakeBtn(leftCard, 148, 24, "Разблокировать", "dark")
     unlockBtn:SetPoint("BOTTOMRIGHT", leftCard, "BOTTOMRIGHT", -10, 10)
     unlockBtn:SetScript("OnClick", function()
         if AP:GetAutoSwapSummary().unlocked then
@@ -4978,10 +5005,10 @@ function AP.BuildServerSyncTab(parent)
         end
     end)
 
-    -- Right Column: Storage (IB/RB/Disperse), M+ Vault & World Boss Cooldowns
+    -- Right Column: Storage, Disperse, Vault & World Boss Cooldowns
     local rHdr1 = rightCard:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     rHdr1:SetPoint("TOPLEFT", 10, -8)
-    rHdr1:SetText("|cffffd200Хранилища, Расщепление и M+ Хранилище|r")
+    rHdr1:SetText("|cffffd200Хранилища, Расщепление и Ключи M+|r")
 
     local statusTxt = rightCard:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     statusTxt:SetPoint("TOPLEFT", 10, -28)
@@ -4989,11 +5016,11 @@ function AP.BuildServerSyncTab(parent)
     statusTxt:SetJustifyH("LEFT")
     statusTxt:SetJustifyV("TOP")
 
-    local openIbBtn = PS.MakeBtn(rightCard, 72, 22, "Банк ИБ", "dark")
+    local openIbBtn = PS.MakeBtn(rightCard, 76, 22, "Банк вещей", "dark")
     openIbBtn:SetPoint("TOPLEFT", 10, -134)
     openIbBtn:SetScript("OnClick", function() AP:OpenItemBank() end)
 
-    local ibEquipNowBtn = PS.MakeBtn(rightCard, 74, 22, "Надеть ИБ", "dark")
+    local ibEquipNowBtn = PS.MakeBtn(rightCard, 90, 22, "Надеть / Склад", "dark")
     ibEquipNowBtn:SetPoint("LEFT", openIbBtn, "RIGHT", 3, 0)
     ibEquipNowBtn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
     ibEquipNowBtn:SetScript("OnClick", function(_, mBtn)
@@ -5001,18 +5028,18 @@ function AP.BuildServerSyncTab(parent)
             local ok, reason, cand = AP:RunItemBankAutoPut(true)
             if DEFAULT_CHAT_FRAME then
                 if ok and cand then
-                    DEFAULT_CHAT_FRAME:AddMessage("|cff38bdf8[AttuneParser]|r Положено в ИБ: " .. tostring(cand.link or cand.name or cand.eid))
+                    DEFAULT_CHAT_FRAME:AddMessage("|cff38bdf8[AttuneParser]|r Положено в Банк вещей: " .. tostring(cand.link or cand.name or cand.eid))
                 else
-                    DEFAULT_CHAT_FRAME:AddMessage("|cff38bdf8[AttuneParser]|r ИБ-склад: " .. tostring(reason or "нет подходящих"))
+                    DEFAULT_CHAT_FRAME:AddMessage("|cff38bdf8[AttuneParser]|r Автосклад: " .. tostring(reason or "нет подходящих вещей"))
                 end
             end
         else
             local ok, reason, cand = AP:RunItemBankAutoEquip(true)
             if DEFAULT_CHAT_FRAME then
                 if ok and cand then
-                    DEFAULT_CHAT_FRAME:AddMessage("|cff38bdf8[AttuneParser]|r Надето из ИБ: " .. tostring(cand.link or cand.name or cand.entry))
+                    DEFAULT_CHAT_FRAME:AddMessage("|cff38bdf8[AttuneParser]|r Надето из Банка вещей: " .. tostring(cand.link or cand.name or cand.entry))
                 else
-                    DEFAULT_CHAT_FRAME:AddMessage("|cff38bdf8[AttuneParser]|r ИБ-экип: " .. tostring(reason or "нет подходящих"))
+                    DEFAULT_CHAT_FRAME:AddMessage("|cff38bdf8[AttuneParser]|r Автонадевание: " .. tostring(reason or "нет подходящих вещей"))
                 end
             end
         end
@@ -5020,14 +5047,14 @@ function AP.BuildServerSyncTab(parent)
     end)
     ibEquipNowBtn:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_TOP")
-        GameTooltip:SetText("ИБ: Надеть / Сложить (ACMSG_IB_EQUIP/PUT)")
-        GameTooltip:AddLine("ЛКМ: надеть 1 подходящую вещь из ИБ в свободный/поглощенный слот.", 0.9, 0.9, 0.9, true)
-        GameTooltip:AddLine("ПКМ: сложить 1 подходящую вещь из сумки в ИБ.", 0.4, 1.0, 0.4, true)
+        GameTooltip:SetText("Банк вещей: Надеть или Сложить")
+        GameTooltip:AddLine("ЛКМ: надеть 1 подходящую вещь в свободный или уже освоенный слот.", 0.9, 0.9, 0.9, true)
+        GameTooltip:AddLine("ПКМ: положить 1 подходящую вещь из сумки в Банк вещей.", 0.4, 1.0, 0.4, true)
         GameTooltip:Show()
     end)
     ibEquipNowBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
-    local depRbBtn = PS.MakeBtn(rightCard, 80, 22, "Сдать в БР", "green")
+    local depRbBtn = PS.MakeBtn(rightCard, 68, 22, "Ресурсы", "green")
     depRbBtn:SetPoint("LEFT", ibEquipNowBtn, "RIGHT", 3, 0)
     depRbBtn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
     depRbBtn:SetScript("OnClick", function(_, mBtn)
@@ -5035,25 +5062,25 @@ function AP.BuildServerSyncTab(parent)
     end)
     depRbBtn:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_TOP")
-        GameTooltip:SetText("ACMSG_RB_DEPOSIT_ALL")
+        GameTooltip:SetText("Банк ресурсов")
         GameTooltip:AddLine("ЛКМ: сдать все подходящие ресурсы из сумок в Банк ресурсов (ПКМ: открыть окно).", 0.9, 0.9, 0.9, true)
         GameTooltip:Show()
     end)
     depRbBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
-    local vaultBtn = PS.MakeBtn(rightCard, 71, 22, "Хран. M+", "dark")
+    local vaultBtn = PS.MakeBtn(rightCard, 62, 22, "Ключи M+", "dark")
     vaultBtn:SetPoint("LEFT", depRbBtn, "RIGHT", 3, 0)
     vaultBtn:SetScript("OnClick", function() AP:RequestMPlusVault() end)
 
-    local dspAlertBtn = PS.MakeBtn(rightCard, 106, 22, "Осколки: ?", "dark")
+    local dspAlertBtn = PS.MakeBtn(rightCard, 96, 22, "Осколки: ?", "dark")
     dspAlertBtn:SetPoint("TOPLEFT", 10, -162)
     dspAlertBtn:SetScript("OnClick", function()
         AP:ToggleDisperseAlert()
         AP.After(0.15, function() box.RefreshData() end, "ap_dsp_pref_ref")
     end)
 
-    local ibSplitBtn = PS.MakeBtn(rightCard, 94, 22, "Сплит ИБ", "dark")
-    ibSplitBtn:SetPoint("LEFT", dspAlertBtn, "RIGHT", 5, 0)
+    local ibSplitBtn = PS.MakeBtn(rightCard, 108, 22, "Разбор дублей", "dark")
+    ibSplitBtn:SetPoint("LEFT", dspAlertBtn, "RIGHT", 3, 0)
     ibSplitBtn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
     ibSplitBtn:SetScript("OnClick", function(_, mBtn)
         if SS.ibSplit and SS.ibSplit.running and type(AP.StopItemBankSplit) == "function" then
@@ -5062,9 +5089,9 @@ function AP.BuildServerSyncTab(parent)
             local sp = AP:GetItemBankSplitPlan(true)
             if DEFAULT_CHAT_FRAME then
                 if not sp.available then
-                    DEFAULT_CHAT_FRAME:AddMessage("|cff38bdf8[AttuneParser]|r ИБ-сплит: " .. tostring(sp.reason or "?"))
+                    DEFAULT_CHAT_FRAME:AddMessage("|cff38bdf8[AttuneParser]|r Разбор дублей: " .. tostring(sp.reason or "?"))
                 else
-                    DEFAULT_CHAT_FRAME:AddMessage(string.format("|cff38bdf8[AttuneParser]|r ИБ-сплит готово: %d шт. (%d групп; оставлено под ковку: %d).", sp.totalCount or 0, sp.groupCount or 0, sp.keptForge or 0))
+                    DEFAULT_CHAT_FRAME:AddMessage(string.format("|cff38bdf8[AttuneParser]|r К разбору готово: %d шт. (%d групп; оставлено под ковку: %d).", sp.totalCount or 0, sp.groupCount or 0, sp.keptForge or 0))
                 end
             end
         elseif type(AP.PromptItemBankSplit) == "function" then
@@ -5074,14 +5101,14 @@ function AP.BuildServerSyncTab(parent)
     end)
     ibSplitBtn:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_TOP")
-        GameTooltip:SetText("Расщепление поглощенных дублей из ИБ")
-        GameTooltip:AddLine("ЛКМ: расщепить полностью поглощенные ненужные копии (сохраняет 1 копию под ковку < т3 и вещи в ЧС).", 0.9, 0.9, 0.9, true)
-        GameTooltip:AddLine("ПКМ: вывести сводку в чат (или /ap ibsplit).", 0.4, 1.0, 0.4, true)
+        GameTooltip:SetText("Расщепление освоенных дубликатов")
+        GameTooltip:AddLine("ЛКМ: расщепить полностью освоенные копии из Банка вещей (сохраняет 1 копию под ковку и черный список).", 0.9, 0.9, 0.9, true)
+        GameTooltip:AddLine("ПКМ: вывести сводку в чат.", 0.4, 1.0, 0.4, true)
         if type(AP.GetItemBankSplitPlan) == "function" then
             local sp = AP:GetItemBankSplitPlan(true)
             if sp.available then
-                GameTooltip:AddLine(string.format("К расщеплению: %d шт. (%d групп) | Оставлено под ковку: %d | Пакет: %s",
-                    sp.totalCount or 0, sp.groupCount or 0, sp.keptForge or 0, sp.dspBatch and "да" or "по 1"), 0.7, 0.85, 1.0, true)
+                GameTooltip:AddLine(string.format("К расщеплению: %d шт. (%d групп) | Оставлено под ковку: %d",
+                    sp.totalCount or 0, sp.groupCount or 0, sp.keptForge or 0), 0.7, 0.85, 1.0, true)
             else
                 GameTooltip:AddLine(tostring(sp.reason or "Недоступно"), 1, 0.5, 0.5, true)
             end
@@ -5090,8 +5117,8 @@ function AP.BuildServerSyncTab(parent)
     end)
     ibSplitBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
-    local wbSyncBtn = PS.MakeBtn(rightCard, 96, 22, "КД боссов", "dark")
-    wbSyncBtn:SetPoint("LEFT", ibSplitBtn, "RIGHT", 5, 0)
+    local wbSyncBtn = PS.MakeBtn(rightCard, 98, 22, "Таймеры боссов", "dark")
+    wbSyncBtn:SetPoint("LEFT", ibSplitBtn, "RIGHT", 3, 0)
     wbSyncBtn:SetScript("OnClick", function()
         AP:RequestWorldBossCD()
         AP:RequestWhereItemsSync()
@@ -5100,7 +5127,7 @@ function AP.BuildServerSyncTab(parent)
 
     local wbHdr = rightCard:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     wbHdr:SetPoint("TOPLEFT", 10, -194)
-    wbHdr:SetText("|cffffd200Мировые боссы (ASMSG_WB_CD)|r")
+    wbHdr:SetText("|cffffd200Мировые боссы и таймеры|r")
 
     local wbListBox = CreateFrame("Frame", nil, rightCard)
     wbListBox:SetPoint("TOPLEFT", 10, -214)
@@ -5160,7 +5187,7 @@ function AP.BuildServerSyncTab(parent)
             unlockBtn.label:SetText("Обновить фильтры")
             PS.PaintBtn(unlockBtn, "dark")
         else
-            unlockBtn.label:SetText("Разблок. (30 мод.)")
+            unlockBtn.label:SetText("Разблокировать")
             PS.PaintBtn(unlockBtn, "dark")
         end
 
@@ -5171,7 +5198,7 @@ function AP.BuildServerSyncTab(parent)
         local ibPutSum = AP:GetItemBankPutSummary(true)
         local ibCnt = ibSum.itemCount or 0
         PS.PaintBtn(ibEquipNowBtn, ((ibSum.eligibleCount or 0) > 0 or (ibPutSum.eligibleCount or 0) > 0) and "green" or "dark")
-        ibPutModeBtn.label:SetText("Режим: " .. tostring(ibPutSum.modeLabel or "Непогл."))
+        ibPutModeBtn.label:SetText("Режим: " .. tostring(ibPutSum.modeLabel or "Неосвоенные"))
         PS.PaintBtn(ibPutModeBtn, ibPutSum.on and "green" or "dark")
 
         local vtStr = "|cff94a3b8нет данных|r"
@@ -5188,14 +5215,14 @@ function AP.BuildServerSyncTab(parent)
             or "|cff94a3b80|r"
 
         local ibAutoStr = ibSum.on
-            and ((ibSum.graceRemain or 0) > 0 and string.format("|cffffd200пауза%dс|r", ibSum.graceRemain) or "|cff40ff40ВКЛ|r")
-            or "|cff94a3b8ВЫК|r"
+            and ((ibSum.graceRemain or 0) > 0 and string.format("|cffffd200пауза %dс|r", ibSum.graceRemain) or "|cff40ff40ВКЛ|r")
+            or "|cff94a3b8ВЫКЛ|r"
         local ibPutStr = ibPutSum.on
-            and ((ibPutSum.pauseRemain or 0) > 0 and string.format("|cffffd200пауза%dс|r", ibPutSum.pauseRemain) or "|cff40ff40ВКЛ|r")
-            or "|cff94a3b8ВЫК|r"
+            and ((ibPutSum.pauseRemain or 0) > 0 and string.format("|cffffd200пауза %dс|r", ibPutSum.pauseRemain) or "|cff40ff40ВКЛ|r")
+            or "|cff94a3b8ВЫКЛ|r"
 
         statusTxt:SetText(string.format(
-            "Банк: |cffffffff%d/%d|r | Экип:%s(%d) | Склад:%s(%d)\nБанк ресурсов: |cffffffff%d/%d|r видов | Пыль: %d М / %d П / %d А\nРасщепление: навык |cff38bdf8%d/%d|r (ранг %d) | Осколки: %s\nЭфир сессии: +%d пыли (+%d навык)\nХранилище эпох (M+): %s",
+            "Банк вещей: |cffffffff%d/%d|r | Автонадевание:%s(%d) | Склад:%s(%d)\nБанк ресурсов: |cffffffff%d/%d|r видов | Пыль: %d М / %d П / %d А\nРасщепление: навык |cff38bdf8%d/%d|r (ранг %d) | Осколки: %s\nЭфир сессии: +%d пыли (+%d навык)\nНаграда ключей M+: %s",
             ibCnt, SS.ib.cap or 0, ibAutoStr, ibSum.eligibleCount or 0, ibPutStr, ibPutSum.eligibleCount or 0,
             st.rbUsed or 0, st.rbMax or 0, st.rbDustEpic or 0, st.rbDustLeg or 0, st.rbDustTit or 0,
             dsp.skill or 0, dsp.maxSkill or 0, dsp.rank or 0, shardStr,
@@ -5208,12 +5235,12 @@ function AP.BuildServerSyncTab(parent)
         dspAlertBtn.label:SetText("Осколки: " .. (dsp.alertOn and "ВКЛ" or "ВЫКЛ"))
         if SS.ibSplit and SS.ibSplit.running then
             PS.PaintBtn(ibSplitBtn, "red")
-            ibSplitBtn.label:SetText("Стоп сплит")
+            ibSplitBtn.label:SetText("Стоп разбор")
         else
             local sp = (type(AP.GetItemBankSplitPlan) == "function") and AP:GetItemBankSplitPlan(true) or nil
             local sc = (sp and sp.totalCount) or 0
             PS.PaintBtn(ibSplitBtn, sc > 0 and "green" or "dark")
-            ibSplitBtn.label:SetText("Сплит ИБ (" .. sc .. ")")
+            ibSplitBtn.label:SetText("Разбор (" .. sc .. ")")
         end
 
         box.wbData = AP:GetWorldBossList()
@@ -5435,7 +5462,7 @@ do
         if why and DEFAULT_CHAT_FRAME then
             local msg = (why == "combat") and "остановлено (бой)"
                 or ((why == "user") and "остановлено пользователем" or tostring(why))
-            DEFAULT_CHAT_FRAME:AddMessage("|cff38bdf8[AttuneParser]|r ИБ-сплит " .. msg .. ".")
+            DEFAULT_CHAT_FRAME:AddMessage("|cff38bdf8[AttuneParser]|r Расщепление дублей " .. msg .. ".")
         end
         AP:Fire("SERVER_SYNC_UPDATED", "IB_SPLIT_STOP")
     end
@@ -5518,14 +5545,14 @@ do
         local sp = AP:GetItemBankSplitPlan(keepForgeCopy)
         if not sp.available or (sp.totalCount or 0) == 0 then
             if DEFAULT_CHAT_FRAME then
-                DEFAULT_CHAT_FRAME:AddMessage("|cff38bdf8[AttuneParser]|r ИБ-сплит: " .. tostring(sp.reason or ("нет лишних поглощенных копий (под ковку оставлено: " .. tostring(sp.keptForge or 0) .. ")")))
+                DEFAULT_CHAT_FRAME:AddMessage("|cff38bdf8[AttuneParser]|r Расщепление дублей: " .. tostring(sp.reason or ("нет лишних поглощенных копий (под ковку оставлено: " .. tostring(sp.keptForge or 0) .. ")")))
             end
             return false, sp.reason or "no_candidates"
         end
         if _G.StaticPopupDialogs and _G.StaticPopup_Show then
             _G.StaticPopupDialogs["ATTUNEPARSER_IB_SPLIT"] = {
                 text = string.format(
-                    "Расщепить из Банка предметов: %d шт. (%d групп)?\n\nЗатрагиваются только полностью поглощенные дубли (сохранено копий под ковку < т3: %d; ЧС не трогается).",
+                    "Расщепить из Банка вещей: %d шт. (%d групп)?\n\nЗатрагиваются только полностью поглощенные дубли (сохранено копий под ковку до Титанического: %d; ЧС не трогается).",
                     sp.totalCount or 0, sp.groupCount or 0, sp.keptForge or 0
                 ),
                 button1 = YES or "Расщепить",
@@ -6288,7 +6315,7 @@ do
                         statusTag = "|cff888888Готово (Т" .. forge .. ")|r"
                         statusOrder = 4
                     elseif why == "morkel" then
-                        statusTag = "|cffff9f40Мор'Кел|r"
+                        statusTag = "|cffff9f40Другой мастер|r"
                         statusOrder = 5
                     elseif why == "blacklist" then
                         statusTag = "|cffff4040[ЧС]|r"
@@ -6356,7 +6383,7 @@ do
                     if eid and eid > 0 then
                         local lk = it.link or ("item:" .. eid)
                         local fTier = tonumber(it.forge) or (AP.forgeByEntry and AP.forgeByEntry[eid]) or 0
-                        AddEntry(nil, nil, nil, "Банк ИБ", lk, fTier, it.guid)
+                        AddEntry(nil, nil, nil, "Банк вещей", lk, fTier, it.guid)
                     end
                 end
             end
@@ -6403,7 +6430,7 @@ do
 
     local function SelectBagSlotInValdris(bag, slot)
         if not IsValdrisFrameOpen() then
-            return false, "Окно Валдриса закрыто"
+            return false, "Окно улучшения предметов закрыто"
         end
         local link = (type(GetContainerItemLink) == "function") and GetContainerItemLink(bag, slot)
         if not link then
@@ -6451,7 +6478,7 @@ do
             if eid then
                 local skip, skipWhy = IsMorKelOrNoRuleItem(eid)
                 if skip then
-                    return false, (skipWhy == "morkel") and "Эту вещь улучшает Мор'Кел (не Валдрис)" or "Этот предмет не улучшается у Валдриса"
+                    return false, (skipWhy == "morkel") and "Эту вещь улучшает другой мастер (не Прогрессия)" or "Этот предмет не улучшается в Прогрессии"
                 end
             end
         end
@@ -6462,7 +6489,7 @@ do
 
     function AP:PickEquippedItemForValdris(invSlot, opts)
         if not IsValdrisFrameOpen() then
-            return false, "Откройте окно Валдриса у НПЦ"
+            return false, "Откройте окно улучшения (Прогрессия предметов)"
         end
         local busy, why = IsPlayerBusyCombatOrDead()
         if busy then return false, (why == "combat") and "В бою нельзя снимать вещи" or "Персонаж мертв" end
@@ -6480,7 +6507,7 @@ do
         if not IsValdrisDispTabOpen() and eid then
             local skip, skipWhy = IsMorKelOrNoRuleItem(eid)
             if skip then
-                return false, (skipWhy == "morkel") and "Эту вещь улучшает Мор'Кел (не Валдрис)" or "Этот предмет не улучшается у Валдриса"
+                return false, (skipWhy == "morkel") and "Эту вещь улучшает другой мастер (не Прогрессия)" or "Этот предмет не улучшается в Прогрессии"
             end
         end
         if type(PickupInventoryItem) ~= "function" or type(PickupContainerItem) ~= "function" then
@@ -6489,7 +6516,7 @@ do
         local fb, fs = FindFreeNormalBagSlot()
         if not fb or not fs then
             if DEFAULT_CHAT_FRAME then
-                DEFAULT_CHAT_FRAME:AddMessage("|cffffd200[Валдрис]|r Нет свободного места в обычных сумках, чтобы снять " .. tostring(link))
+                DEFAULT_CHAT_FRAME:AddMessage("|cffffd200[Прогрессия]|r Нет свободного места в обычных сумках, чтобы снять " .. tostring(link))
             end
             return false, "bag_full"
         end
@@ -6525,7 +6552,7 @@ do
                 SelectBagSlotInValdris(fb, fs)
             end
             if not silent and DEFAULT_CHAT_FRAME then
-                DEFAULT_CHAT_FRAME:AddMessage("|cff38bdf8[Валдрис]|r Снято в сумку и выбрано: " .. tostring(link))
+                DEFAULT_CHAT_FRAME:AddMessage("|cff38bdf8[Прогрессия]|r Снято в сумку и выбрано: " .. tostring(link))
             end
             if onReady then pcall(onReady, fb, fs, invSlot) end
             return true, "picked", fb, fs
@@ -6627,7 +6654,7 @@ do
                 SelectBagSlotInValdris(ab, as)
             end
             if not u.silent and DEFAULT_CHAT_FRAME then
-                DEFAULT_CHAT_FRAME:AddMessage("|cff38bdf8[Валдрис]|r Снято в сумку и выбрано: " .. tostring(u.link))
+                DEFAULT_CHAT_FRAME:AddMessage("|cff38bdf8[Прогрессия]|r Снято в сумку и выбрано: " .. tostring(u.link))
             end
             if u.onReady then pcall(u.onReady, ab, as, u.invSlot) end
             return true
@@ -6671,7 +6698,7 @@ do
                 SelectBagSlotInValdris(ab, as)
             end
             if not bt.silent and DEFAULT_CHAT_FRAME then
-                DEFAULT_CHAT_FRAME:AddMessage("|cff38bdf8[Валдрис]|r Забрано из Банка предметов и выбрано: " .. tostring(alk or bt.link))
+                DEFAULT_CHAT_FRAME:AddMessage("|cff38bdf8[Прогрессия]|r Забрано из Банка вещей и выбрано: " .. tostring(alk or bt.link))
             end
             if bt.onReady then pcall(bt.onReady, ab, as, bt.entry, alk or bt.link) end
             return true
@@ -6734,7 +6761,7 @@ do
 
     function AP:PickBankItemForValdris(guid, link, forge, opts)
         if not IsValdrisFrameOpen() then
-            return false, "Откройте окно Валдриса у НПЦ"
+            return false, "Откройте окно улучшения (Прогрессия предметов)"
         end
         local busy, why = IsPlayerBusyCombatOrDead()
         if busy then return false, (why == "combat") and "В бою недоступно" or "Персонаж мертв" end
@@ -6742,21 +6769,21 @@ do
             return false, "Освободите курсор"
         end
         guid = tonumber(guid)
-        if not guid or guid <= 0 then return false, "Некорректный предмет ИБ" end
+        if not guid or guid <= 0 then return false, "Некорректный предмет" end
         local eid = AP.ExtractItemId and AP.ExtractItemId(link)
         if not IsValdrisDispTabOpen() and eid then
             local skip, skipWhy = IsMorKelOrNoRuleItem(eid)
             if skip then
-                return false, (skipWhy == "morkel") and "Эту вещь улучшает Мор'Кел (не Валдрис)" or "Этот предмет не улучшается у Валдриса"
+                return false, (skipWhy == "morkel") and "Эту вещь улучшает другой мастер (не Прогрессия)" or "Этот предмет не улучшается в Прогрессии"
             end
         end
         if vp.pendingBankTake and (GetTime() - (vp.pendingBankTake.at or 0)) <= 3.2 then
-            return false, "Ожидается забор вещи из Банка предметов"
+            return false, "Ожидается забор вещи из Банка вещей"
         end
         local fb, fs = FindFreeNormalBagSlot()
         if not fb or not fs then
             if DEFAULT_CHAT_FRAME then
-                DEFAULT_CHAT_FRAME:AddMessage("|cffffd200[Валдрис]|r Нет свободного места в обычных сумках, чтобы забрать вещь из Банка предметов.")
+                DEFAULT_CHAT_FRAME:AddMessage("|cffffd200[Прогрессия]|r Нет свободного места в обычных сумках, чтобы забрать вещь из Банка вещей.")
             end
             return false, "bag_full"
         end
@@ -6784,7 +6811,7 @@ do
         }
         if not AP:TakeItemBankItem(guid) then
             vp.pendingBankTake = nil
-            return false, "Ошибка запроса ACMSG_IB_TAKE"
+            return false, "Ошибка запроса предмета из Банка вещей"
         end
         if vpPicker and vpPicker:IsShown() and not (opts and opts.keepPicker) then vpPicker:Hide() end
         if CheckPendingBankTake() then
@@ -6893,7 +6920,7 @@ do
             else
                 local cnt = sum.totalEligible or 0
                 PS.PaintBtn(vpBar.goBtn, cnt > 0 and "green" or "dark")
-                vpBar.goBtn.label:SetText("Авто-ап (" .. cnt .. ")")
+                vpBar.goBtn.label:SetText("Улучшать (" .. cnt .. ")")
             end
         end
         if sum.needsWarm and not vp.running and AP.After and not vp.barWarmScheduled and (vp.barWarmCount or 0) < 3 then
@@ -6921,13 +6948,13 @@ do
         RefreshValdrisBar()
         if wasRunning and DEFAULT_CHAT_FRAME and why then
             if why == "done" then
-                DEFAULT_CHAT_FRAME:AddMessage(string.format("|cff40ff40[Валдрис]|r Готово! Улучшено предметов: %d.", vp.doneCount or 0))
+                DEFAULT_CHAT_FRAME:AddMessage(string.format("|cff40ff40[Прогрессия]|r Готово! Улучшено предметов: %d.", vp.doneCount or 0))
             elseif why == "combat" then
-                DEFAULT_CHAT_FRAME:AddMessage("|cffffd200[Валдрис]|r Авто-улучшение остановлено (вход в бой).")
+                DEFAULT_CHAT_FRAME:AddMessage("|cffffd200[Прогрессия]|r Автоулучшение остановлено (вход в бой).")
             elseif why == "user" then
-                DEFAULT_CHAT_FRAME:AddMessage(string.format("|cff38bdf8[Валдрис]|r Авто-улучшение остановлено (улучшено: %d).", vp.doneCount or 0))
+                DEFAULT_CHAT_FRAME:AddMessage(string.format("|cff38bdf8[Прогрессия]|r Автоулучшение остановлено (улучшено: %d).", vp.doneCount or 0))
             elseif why ~= "closed" then
-                DEFAULT_CHAT_FRAME:AddMessage("|cffffd200[Валдрис]|r Остановлено: " .. tostring(why))
+                DEFAULT_CHAT_FRAME:AddMessage("|cffffd200[Прогрессия]|r Остановлено: " .. tostring(why))
             end
         end
         if AP:GetSetting("ibAutoEquip") == true and type(AP.ScheduleItemBankAutoEquip) == "function" then
@@ -7043,7 +7070,7 @@ do
             if needsWarm and (vp.warmRetries or 0) < 6 then
                 vp.warmRetries = (vp.warmRetries or 0) + 1
                 if vp.warmRetries == 1 and DEFAULT_CHAT_FRAME then
-                    DEFAULT_CHAT_FRAME:AddMessage("|cff38bdf8[Валдрис]|r Загрузка кэша предметов...")
+                    DEFAULT_CHAT_FRAME:AddMessage("|cff38bdf8[Прогрессия]|r Загрузка кэша предметов...")
                 end
                 AP:ScheduleValdrisStep(0.50)
                 RefreshValdrisBar()
@@ -7146,7 +7173,7 @@ do
 
     function AP:StartValdrisAutoUpgrade()
         if not IsValdrisFrameOpen() then
-            return false, "Откройте окно Валдриса у НПЦ"
+            return false, "Откройте окно улучшения (Прогрессия предметов)"
         end
         local busy = IsPlayerBusyCombatOrDead()
         if busy then return false, "В бою недоступно" end
@@ -7312,7 +7339,7 @@ do
                 vp.blockedByTier[needTier] = true
                 vp.skip[q.key] = 13
                 if DEFAULT_CHAT_FRAME then
-                    DEFAULT_CHAT_FRAME:AddMessage(string.format("|cffffd200[Валдрис]|r Не хватает ресурсов для ступени %d - пропускаю.", needTier))
+                    DEFAULT_CHAT_FRAME:AddMessage(string.format("|cffffd200[Прогрессия]|r Не хватает ресурсов для ступени %d - пропускаю.", needTier))
                 end
                 AP:ScheduleValdrisStep(0.01)
             else
@@ -7374,7 +7401,7 @@ do
                     if AP.InvalidateZoneCache then AP:InvalidateZoneCache(nil) end
                 end
                 if DEFAULT_CHAT_FRAME then
-                    DEFAULT_CHAT_FRAME:AddMessage(string.format("|cff40ff40[Валдрис]|r +%d: %s (%d -> %d)", vp.doneCount, tostring(d.link or d.name or entry), from, to))
+                    DEFAULT_CHAT_FRAME:AddMessage(string.format("|cff40ff40[Прогрессия]|r +%d: %s (%d -> %d)", vp.doneCount, tostring(d.link or d.name or entry), from, to))
                 end
                 RefreshValdrisBar()
                 if vp.running then
@@ -7392,14 +7419,14 @@ do
                 vp.skip[d.key] = 13
                 vp.lastError = (text and text ~= "") and text or "Не хватает ресурсов"
                 if DEFAULT_CHAT_FRAME then
-                    DEFAULT_CHAT_FRAME:AddMessage("|cffffd200[Валдрис]|r " .. vp.lastError .. " (пропускаю ступень " .. needTier .. ").")
+                    DEFAULT_CHAT_FRAME:AddMessage("|cffffd200[Прогрессия]|r " .. vp.lastError .. " (пропускаю ступень " .. needTier .. ").")
                 end
                 if vp.running then AP:ScheduleValdrisStep(0.01) end
             else
                 vp.skip[d.key] = st or "err"
                 vp.lastError = (text and text ~= "") and text or ("Код " .. tostring(st))
                 if DEFAULT_CHAT_FRAME then
-                    DEFAULT_CHAT_FRAME:AddMessage("|cffff8040[Валдрис]|r Пропуск " .. tostring(d.name or entry) .. ": " .. vp.lastError)
+                    DEFAULT_CHAT_FRAME:AddMessage("|cffff8040[Прогрессия]|r Пропуск " .. tostring(d.name or entry) .. ": " .. vp.lastError)
                 end
                 if vp.running then AP:ScheduleValdrisStep(0.01) end
             end
@@ -7433,7 +7460,7 @@ do
 
         local title = pf:CreateFontString(nil, "OVERLAY", "GameFontNormal")
         title:SetPoint("TOPLEFT", 10, -8)
-        title:SetText("|cffffd200Выбор предмета (Валдрис)|r")
+        title:SetText("|cffffd200Выбор предмета для улучшения|r")
 
         local closeBtn = CreateFrame("Button", nil, pf)
         closeBtn:SetPoint("TOPRIGHT", -6, -6)
@@ -7449,7 +7476,7 @@ do
             { k = "all", txt = "Все", w = 42 },
             { k = "bags", txt = "Сумки", w = 56 },
             { k = "equipped", txt = "Надетые", w = 64 },
-            { k = "bank", txt = "Банк ИБ", w = 64 },
+            { k = "bank", txt = "Банк вещей", w = 82 },
         }
         local prevTab = nil
         for _, td in ipairs(tabs) do
@@ -7565,17 +7592,17 @@ do
                 end
                 GameTooltip:AddLine(" ")
                 if d.statusKey == "morkel" then
-                    GameTooltip:AddLine("Эту сетовую вещь улучшает Мор'Кел (не Валдрис).", 1.0, 0.62, 0.25, true)
+                    GameTooltip:AddLine("Эту сетовую вещь улучшает другой мастер (не Прогрессия).", 1.0, 0.62, 0.25, true)
                 elseif d.statusKey == "warming" then
                     GameTooltip:AddLine("Загрузка информации о предмете с сервера...", 0.75, 0.75, 0.75, true)
                 elseif d.statusKey == "no_rule" then
-                    GameTooltip:AddLine("Этот предмет не улучшается у Валдриса.", 0.75, 0.75, 0.75, true)
+                    GameTooltip:AddLine("Этот предмет не улучшается в Прогрессии.", 0.75, 0.75, 0.75, true)
                 elseif d.isEquipped then
-                    GameTooltip:AddLine("Клик: снять в сумку и выбрать у Валдриса.", 0.4, 1.0, 0.4, true)
+                    GameTooltip:AddLine("Клик: снять в сумку и выбрать для улучшения.", 0.4, 1.0, 0.4, true)
                 elseif d.isBank then
-                    GameTooltip:AddLine("Клик: забрать из Банка предметов и выбрать у Валдриса.", 0.65, 0.55, 1.0, true)
+                    GameTooltip:AddLine("Клик: забрать из Банка вещей и выбрать для улучшения.", 0.65, 0.55, 1.0, true)
                 else
-                    GameTooltip:AddLine("Клик: выбрать у Валдриса.", 0.4, 1.0, 0.4, true)
+                    GameTooltip:AddLine("Клик: выбрать для улучшения.", 0.4, 1.0, 0.4, true)
                 end
                 GameTooltip:Show()
             end)
@@ -7588,25 +7615,25 @@ do
                 if not d then return end
                 if not IsValdrisDispTabOpen() and (d.statusKey == "morkel" or d.statusKey == "no_rule") then
                     if DEFAULT_CHAT_FRAME then
-                        local msg = (d.statusKey == "morkel") and "Эту сетовую вещь улучшает Мор'Кел (не Валдрис)." or "Этот предмет не улучшается у Валдриса."
-                        DEFAULT_CHAT_FRAME:AddMessage("|cffffd200[Валдрис]|r " .. msg)
+                        local msg = (d.statusKey == "morkel") and "Эту сетовую вещь улучшает другой мастер (не Прогрессия)." or "Этот предмет не улучшается в Прогрессии."
+                        DEFAULT_CHAT_FRAME:AddMessage("|cffffd200[Прогрессия]|r " .. msg)
                     end
                     return
                 end
                 if d.isEquipped then
                     local ok, reason = AP:PickEquippedItemForValdris(d.invSlot)
                     if not ok and DEFAULT_CHAT_FRAME then
-                        DEFAULT_CHAT_FRAME:AddMessage("|cffffd200[Валдрис]|r " .. tostring(reason))
+                        DEFAULT_CHAT_FRAME:AddMessage("|cffffd200[Прогрессия]|r " .. tostring(reason))
                     end
                 elseif d.isBank then
                     local ok, reason = AP:PickBankItemForValdris(d.ibGuid, d.link, d.forge)
                     if not ok and DEFAULT_CHAT_FRAME then
-                        DEFAULT_CHAT_FRAME:AddMessage("|cffffd200[Валдрис]|r " .. tostring(reason))
+                        DEFAULT_CHAT_FRAME:AddMessage("|cffffd200[Прогрессия]|r " .. tostring(reason))
                     end
                 else
                     local ok, reason = AP:PickBagItemForValdris(d.bag, d.slot)
                     if not ok and reason and DEFAULT_CHAT_FRAME then
-                        DEFAULT_CHAT_FRAME:AddMessage("|cffffd200[Валдрис]|r " .. tostring(reason))
+                        DEFAULT_CHAT_FRAME:AddMessage("|cffffd200[Прогрессия]|r " .. tostring(reason))
                     end
                 end
             end)
@@ -7664,7 +7691,7 @@ do
                     if d.isEquipped then
                         r.subFs:SetText("|cffffd200[Надето: " .. tostring(d.slotLabel) .. "]|r  ilvl " .. (d.ilvl or 0) .. forgeLbl)
                     elseif d.isBank then
-                        r.subFs:SetText("|cffa78bfa[Банк ИБ]|r  ilvl " .. (d.ilvl or 0) .. forgeLbl)
+                        r.subFs:SetText("|cffa78bfa[Банк вещей]|r  ilvl " .. (d.ilvl or 0) .. forgeLbl)
                     else
                         r.subFs:SetText("|cff38bdf8[Сумка " .. d.bag .. ":" .. d.slot .. "]|r  ilvl " .. (d.ilvl or 0) .. forgeLbl)
                     end
@@ -7744,16 +7771,16 @@ do
         end)
         pickBtn:SetScript("OnEnter", function(self)
             GameTooltip:SetOwner(self, "ANCHOR_TOP")
-            GameTooltip:SetText("|cffffd200Выбор предмета для Валдриса|r")
+            GameTooltip:SetText("|cffffd200Выбор предмета для улучшения|r")
             GameTooltip:AddLine("ЛКМ: открыть список вещей с иконками (включая надетые на персонаже).", 0.9, 0.9, 0.9, true)
-            GameTooltip:AddLine("ALT + ЛКМ: по любой вещи в сумке или в окне персонажа -> сразу снять в сумку и выбрать у Валдриса!", 0.4, 1.0, 0.4, true)
+            GameTooltip:AddLine("ALT + ЛКМ: по любой вещи в сумке или в окне персонажа -> сразу снять в сумку и выбрать!", 0.4, 1.0, 0.4, true)
             GameTooltip:AddLine("ПКМ: сбросить иконку выбора.", 0.7, 0.8, 0.9, true)
             GameTooltip:Show()
         end)
         pickBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
         f.pickBtn = pickBtn
 
-        local goBtn = PS.MakeBtn(f, 100, 20, "Авто-ап (0)", "dark")
+        local goBtn = PS.MakeBtn(f, 100, 20, "Улучшать (0)", "dark")
         goBtn:SetPoint("LEFT", pickBtn, "RIGHT", 4, 0)
         goBtn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
         goBtn:SetScript("OnClick", function(_, mBtn)
@@ -7766,23 +7793,23 @@ do
                 vp.bankSpaceFull = false
                 local sum = AP:GetValdrisUpgradeSummary(false)
                 if DEFAULT_CHAT_FRAME then
-                    DEFAULT_CHAT_FRAME:AddMessage(string.format("|cff38bdf8[Валдрис]|r Найдено к улучшению: %d (цель<=%d, банкИБ=%s, надетые=%s).",
+                    DEFAULT_CHAT_FRAME:AddMessage(string.format("|cff38bdf8[Прогрессия]|r Найдено к улучшению: %d (цель<=%d, Банк вещей=%s, надетые=%s).",
                         sum.totalEligible or 0, sum.maxTier or 3, sum.includeBank and "да" or "нет", sum.includeEquipped and "да" or "нет"))
                 end
                 RefreshValdrisBar()
             else
                 local ok, reason = AP:StartValdrisAutoUpgrade()
                 if not ok and reason ~= "done" and reason ~= "closed" and reason ~= "warming" and reason ~= "stopped" and DEFAULT_CHAT_FRAME then
-                    DEFAULT_CHAT_FRAME:AddMessage("|cffffd200[Валдрис]|r " .. tostring(reason or "нет подходящих вещей"))
+                    DEFAULT_CHAT_FRAME:AddMessage("|cffffd200[Прогрессия]|r " .. tostring(reason or "нет подходящих вещей"))
                 end
             end
         end)
         goBtn:SetScript("OnEnter", function(self)
             local sum = AP:GetValdrisUpgradeSummary(false)
             GameTooltip:SetOwner(self, "ANCHOR_TOP")
-            GameTooltip:SetText("|cffffd200Авто-улучшение у Валдриса (AttuneParser)|r")
-            GameTooltip:AddLine("ЛКМ: старт/стоп авто-повышения ковки для поглощенных несетовых вещей (сумки + Банк ИБ).", 0.9, 0.9, 0.9, true)
-            GameTooltip:AddLine("ПКМ: пересканировать (или /ap valdris).", 0.4, 1.0, 0.4, true)
+            GameTooltip:SetText("|cffffd200Автоулучшение вещей (AttuneParser)|r")
+            GameTooltip:AddLine("ЛКМ: старт/стоп авто-повышения ковки для поглощенных несетовых вещей (сумки + Банк вещей).", 0.9, 0.9, 0.9, true)
+            GameTooltip:AddLine("ПКМ: пересканировать.", 0.4, 1.0, 0.4, true)
             GameTooltip:AddLine(string.format("Готово к улучшению: %d | Улучшено за сессию: %d", sum.totalEligible or 0, sum.doneCount or 0), 0.7, 0.85, 1.0, true)
             GameTooltip:Show()
         end)
@@ -7794,7 +7821,7 @@ do
         tierBtn:SetScript("OnClick", function() AP:CycleValdrisMaxTier() end)
         tierBtn:SetScript("OnEnter", function(self)
             GameTooltip:SetOwner(self, "ANCHOR_TOP")
-            GameTooltip:SetText("Потолок авто-улучшения")
+            GameTooltip:SetText("Потолок автоулучшения")
             GameTooltip:AddLine("ЛКМ: переключить максимальную ступень (1 Эпик / 2 Лег. / 3 Титан).", 0.9, 0.9, 0.9, true)
             GameTooltip:Show()
         end)
@@ -7803,7 +7830,7 @@ do
 
         local incBkChk = CreateFrame("Button", nil, f)
         incBkChk:SetPoint("LEFT", tierBtn, "RIGHT", 5, 0)
-        incBkChk:SetSize(74, 20)
+        incBkChk:SetSize(78, 20)
         local bBox = CreateFrame("Frame", nil, incBkChk)
         bBox:SetPoint("LEFT", incBkChk, "LEFT", 0, 0)
         bBox:SetSize(15, 15)
@@ -7812,7 +7839,7 @@ do
         bmk:SetPoint("CENTER", 0, 0)
         local blbl = incBkChk:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
         blbl:SetPoint("LEFT", bBox, "RIGHT", 4, 0)
-        blbl:SetText("Банк ИБ")
+        blbl:SetText("Из банка")
         incBkChk._box = bBox
         incBkChk._mk = bmk
         incBkChk:SetScript("OnClick", function()
@@ -7820,8 +7847,8 @@ do
         end)
         incBkChk:SetScript("OnEnter", function(self)
             GameTooltip:SetOwner(self, "ANCHOR_TOP")
-            GameTooltip:SetText("Брать вещи из Банка предметов")
-            GameTooltip:AddLine("Если включено, Авто-ап забирает подходящие вещи из Банка ИБ, улучшает и возвращает их обратно в банк.", 0.9, 0.9, 0.9, true)
+            GameTooltip:SetText("Брать вещи из Банка вещей")
+            GameTooltip:AddLine("Если включено, автоулучшение забирает подходящие вещи из Банка вещей, улучшает и возвращает их обратно.", 0.9, 0.9, 0.9, true)
             GameTooltip:Show()
         end)
         incBkChk:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -7829,7 +7856,7 @@ do
 
         local incEqChk = CreateFrame("Button", nil, f)
         incEqChk:SetPoint("LEFT", incBkChk, "RIGHT", 4, 0)
-        incEqChk:SetSize(104, 20)
+        incEqChk:SetSize(102, 20)
         local eBox = CreateFrame("Frame", nil, incEqChk)
         eBox:SetPoint("LEFT", incEqChk, "LEFT", 0, 0)
         eBox:SetSize(15, 15)
@@ -7846,8 +7873,8 @@ do
         end)
         incEqChk:SetScript("OnEnter", function(self)
             GameTooltip:SetOwner(self, "ANCHOR_TOP")
-            GameTooltip:SetText("Авто-снятие надетых вещей для Авто-апа")
-            GameTooltip:AddLine("Если включено, Авто-ап также снимает подходящие надетые вещи в сумку, улучшает их и надевает обратно.", 0.9, 0.9, 0.9, true)
+            GameTooltip:SetText("Автоснятие надетых вещей для улучшения")
+            GameTooltip:AddLine("Если включено, автоулучшение снимает подходящие надетые вещи в сумку, улучшает их и надевает обратно.", 0.9, 0.9, 0.9, true)
             GameTooltip:Show()
         end)
         incEqChk:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -7855,7 +7882,7 @@ do
 
         local autoChk = CreateFrame("Button", nil, f)
         autoChk:SetPoint("LEFT", incEqChk, "RIGHT", 4, 0)
-        autoChk:SetSize(92, 20)
+        autoChk:SetSize(90, 20)
         local cBox = CreateFrame("Frame", nil, autoChk)
         cBox:SetPoint("LEFT", autoChk, "LEFT", 0, 0)
         cBox:SetSize(15, 15)
@@ -7872,8 +7899,8 @@ do
         end)
         autoChk:SetScript("OnEnter", function(self)
             GameTooltip:SetOwner(self, "ANCHOR_TOP")
-            GameTooltip:SetText("Авто-старт у Валдриса")
-            GameTooltip:AddLine("При включении автоматически запускает улучшение сразу при открытии окна Валдриса.", 0.9, 0.9, 0.9, true)
+            GameTooltip:SetText("Авто-старт улучшения")
+            GameTooltip:AddLine("При включении автоматически запускает улучшение сразу при открытии окна Прогрессии.", 0.9, 0.9, 0.9, true)
             GameTooltip:Show()
         end)
         autoChk:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -7907,7 +7934,7 @@ do
         if not link then return false end
         local ok, reason = AP:PickBagItemForValdris(bag, slot)
         if not ok and reason and DEFAULT_CHAT_FRAME then
-            DEFAULT_CHAT_FRAME:AddMessage("|cffffd200[Валдрис]|r " .. tostring(reason))
+            DEFAULT_CHAT_FRAME:AddMessage("|cffffd200[Прогрессия]|r " .. tostring(reason))
         end
         return true
     end
@@ -7932,7 +7959,7 @@ do
         if not link then return false end
         local ok, reason = AP:PickEquippedItemForValdris(invId)
         if not ok and DEFAULT_CHAT_FRAME then
-            DEFAULT_CHAT_FRAME:AddMessage("|cffffd200[Валдрис]|r " .. tostring(reason))
+            DEFAULT_CHAT_FRAME:AddMessage("|cffffd200[Прогрессия]|r " .. tostring(reason))
         end
         return true
     end
