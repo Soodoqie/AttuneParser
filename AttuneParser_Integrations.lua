@@ -32,6 +32,7 @@ do
     local pendingOpen = nil
     local hookInstalled = false
     local badgeTimer = 0
+    local UpdateEJLootBadges
 
     local function SafeCall(fn, ...)
         if type(fn) ~= "function" then return false end
@@ -923,7 +924,7 @@ do
         end
     end
 
-    local function UpdateEJLootBadges()
+    UpdateEJLootBadges = function()
         local ej = rawget(_G, "EncounterJournal")
         if not ej or not ej:IsShown() then return end
         local scrollChild = rawget(_G, "EncounterJournalEncounterFrameInfoLootScrollFrameScrollChild")
@@ -1070,17 +1071,18 @@ do
             r:SetPoint("TOPRIGHT", f.listBox, "TOPRIGHT", -4, -5 - (i - 1) * 29)
             PS.StyleScrollRow(r, (i % 2) == 1)
 
-            r.left = r:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-            r.left:SetPoint("LEFT", r, "LEFT", 6, 0)
-            r.left:SetSize(222, 16)
-            r.left:SetJustifyH("LEFT")
-            if r.left.SetWordWrap then r.left:SetWordWrap(false) end
-
             r.right = r:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
             r.right:SetPoint("RIGHT", r, "RIGHT", -6, 0)
             r.right:SetSize(64, 16)
             r.right:SetJustifyH("RIGHT")
             if r.right.SetWordWrap then r.right:SetWordWrap(false) end
+
+            r.left = r:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+            r.left:SetPoint("LEFT", r, "LEFT", 6, 0)
+            r.left:SetPoint("RIGHT", r.right, "LEFT", -6, 0)
+            r.left:SetHeight(16)
+            r.left:SetJustifyH("LEFT")
+            if r.left.SetWordWrap then r.left:SetWordWrap(false) end
 
             r:SetScript("OnClick", function(self)
                 local d = self._d
@@ -1650,17 +1652,18 @@ do
             r.nameTxt:SetJustifyH("LEFT")
             if r.nameTxt.SetWordWrap then r.nameTxt:SetWordWrap(false) end
 
-            r.tierTxt = r:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-            r.tierTxt:SetPoint("LEFT", r.nameTxt, "RIGHT", 4, 0)
-            r.tierTxt:SetSize(106, 16)
-            r.tierTxt:SetJustifyH("LEFT")
-            if r.tierTxt.SetWordWrap then r.tierTxt:SetWordWrap(false) end
-
             r.priceTxt = r:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
             r.priceTxt:SetPoint("RIGHT", r, "RIGHT", -6, 0)
             r.priceTxt:SetSize(64, 16)
             r.priceTxt:SetJustifyH("RIGHT")
             if r.priceTxt.SetWordWrap then r.priceTxt:SetWordWrap(false) end
+
+            r.tierTxt = r:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+            r.tierTxt:SetPoint("LEFT", r.nameTxt, "RIGHT", 4, 0)
+            r.tierTxt:SetPoint("RIGHT", r.priceTxt, "LEFT", -4, 0)
+            r.tierTxt:SetHeight(16)
+            r.tierTxt:SetJustifyH("LEFT")
+            if r.tierTxt.SetWordWrap then r.tierTxt:SetWordWrap(false) end
 
             r:SetScript("OnClick", function(self, mBtn)
                 local it = self._it
@@ -2637,9 +2640,12 @@ local function ProbeWorldBossTooltipName(entry)
     end
     if type(tip.ClearLines) == "function" then tip:ClearLines() end
     local ok = pcall(tip.SetHyperlink, tip, "unit:Creature-0-0-0-0-" .. entry .. "-0")
-    if not ok then return nil end
-    local fs = rawget(_G, "AttuneParserScanTipTextLeft1")
-    local txt = fs and type(fs.GetText) == "function" and fs:GetText() or nil
+    local txt = nil
+    if ok then
+        local fs = rawget(_G, "AttuneParserScanTipTextLeft1")
+        txt = fs and type(fs.GetText) == "function" and fs:GetText() or nil
+    end
+    if type(tip.Hide) == "function" then tip:Hide() end
     if type(txt) == "string" and txt ~= "" and txt ~= tostring(entry) and not txt:find("^Неизвестно") then
         SS.wb.names[entry] = txt
         return txt
@@ -2690,7 +2696,8 @@ local function ResolveWorldBossName(entry)
     end
     local cre = AP.Data and AP.Data.Creatures
     if cre and cre[entry] then
-        return tostring(cre[entry])
+        local raw = tostring(cre[entry])
+        return raw:match("^([^|]+)") or raw
     end
     local probed = ProbeWorldBossTooltipName(entry)
     if probed then return probed end
@@ -2919,6 +2926,18 @@ do
             end
 
             local topFilter = (zoneIdFilter and AP.Data and AP.Data.TopMap and AP.Data.TopMap[zoneIdFilter]) or zoneIdFilter
+            local zonePool = nil
+            if topFilter then
+                zonePool = {}
+                local zStatic = AP.Data and AP.Data.ZoneItems and AP.Data.ZoneItems[topFilter]
+                if zStatic then
+                    for _, ze in ipairs(zStatic) do zonePool[ze] = true end
+                end
+                local zSrv = AP.serverZoneItems and AP.serverZoneItems[topFilter]
+                if zSrv then
+                    for ze in pairs(zSrv) do zonePool[ze] = true end
+                end
+            end
             local function TryPush(whereLabel, eid, link, pTier, guid, cntVal, dspVal)
                 if not eid or eid <= 0 then return end
                 if not AP:CanHeroAbsorb(eid, link) then return end
@@ -2927,7 +2946,7 @@ do
                 pTier = tonumber(pTier) or 0
                 local doneTier = (info.doneTier ~= nil) and info.doneTier or -1
                 if (not includeNeedsForge) and pTier <= doneTier then return end
-                if zoneIdFilter and info.primaryZone ~= topFilter and info.primaryZone ~= zoneIdFilter then return end
+                if zoneIdFilter and info.primaryZone ~= topFilter and info.primaryZone ~= zoneIdFilter and not (zonePool and zonePool[eid]) then return end
                 local dupK = whereLabel .. ":" .. eid .. ":" .. pTier
                 if guid then dupK = whereLabel .. ":g:" .. guid end
                 if seenKey[dupK] then return end
@@ -3266,9 +3285,15 @@ do
             if t.ClearLines then t:ClearLines() end
             ok = pcall(t.SetHyperlink, t, link)
         end
-        if not ok then return true end
+        if not ok then
+            if t.Hide then t:Hide() end
+            return true
+        end
         local n = (t.NumLines and t:NumLines()) or 0
-        if n < 2 then return true end
+        if n < 2 then
+            if t.Hide then t:Hide() end
+            return true
+        end
         local res = true
         for i = 2, n do
             if IsTipLineRed(rawget(_G, "AP_IBAutoScanTipTextLeft" .. i))
@@ -5451,9 +5476,9 @@ do
                 else
                     local needKeep = keep and (not isCompleted) and (forge < 3)
                     if needKeep then
-                        local cur = keepPickByEid[eid]
+                        local cur = keepPickByEid[bKey]
                         if not cur or forge > cur.forge then
-                            keepPickByEid[eid] = { guid = guid, forge = forge, bKey = bKey }
+                            keepPickByEid[bKey] = { guid = guid, forge = forge, bKey = bKey }
                         end
                     end
                     evalList[#evalList + 1] = {
@@ -6082,14 +6107,14 @@ do
         local curDone, nextOpen = false, true
         if type(fnSrv) == "function" then
             local ok, done, cant, _, attun = pcall(fnSrv, eid, bagForge, sfx)
-            if ok and attun ~= nil then
-                curDone = (done == true) and (not cant) and (attun ~= false)
+            if ok and attun == false then
+                return false, "no_attune"
+            elseif ok and attun ~= nil then
+                curDone = (done == true) and (not cant)
                 if curDone then
                     local okM, doneM = pcall(fnSrv, eid, wantMax, sfx)
                     if okM and doneM == true then nextOpen = false end
                 end
-            elseif ok and attun == false then
-                return false, "no_attune"
             end
         elseif type(AP.GetItemServerStatus) == "function" then
             local st = AP:GetItemServerStatus(eid, "item:" .. eid)
@@ -7542,8 +7567,9 @@ do
         pf.filterBtns = fBtns
 
         local srchBg = CreateFrame("Frame", nil, pf)
-        srchBg:SetSize(218, 20)
-        srchBg:SetPoint("TOPRIGHT", -10, -30)
+        srchBg:SetPoint("LEFT", prevTab, "RIGHT", 6, 0)
+        srchBg:SetPoint("RIGHT", pf, "RIGHT", -10, 0)
+        srchBg:SetHeight(20)
         PS.StyleBox(srchBg, 0.75, false)
         local srch = CreateFrame("EditBox", nil, srchBg)
         srch:SetPoint("TOPLEFT", 5, -2)
@@ -9117,7 +9143,7 @@ do
                         end
                         local ilvl = tonumber((meta and meta.ilvl and meta.ilvl > 0 and meta.ilvl) or (giIlvl and giIlvl > 0 and giIlvl) or (info and info.ilvl)) or 0
                         local grade, gradeIlvl = DetectSubGrade(sDef.tier, ilvl)
-                        local invId = (meta and meta.inv and meta.inv > 0 and meta.inv) or (info and info.inv and info.inv > 0 and info.inv) or 0
+                        local invId = (meta and meta.inv and meta.inv > 0 and meta.inv) or (info and info.invType and info.invType > 0 and info.invType) or 0
                         if invId == 0 and giEquipLoc then
                             for kId, locStr in pairs(INV_ID_TO_LOC) do
                                 if locStr == giEquipLoc then invId = kId; break end
@@ -9228,6 +9254,8 @@ do
             }
         end
 
+        local warmRetry = {}
+        local warmPassChanged = false
         warmDrv:SetScript("OnUpdate", function(self, elapsed)
             if not warmRunning then self:Hide(); return end
             warmAcc = warmAcc + (elapsed or 0)
@@ -9237,16 +9265,37 @@ do
                 or (type(UnitAffectingCombat) == "function" and UnitAffectingCombat("player"))
             if inC then return end
             local nextEid = table.remove(warmQueue, 1)
+            if not nextEid and #warmRetry > 0 then
+                warmQueue = warmRetry
+                warmRetry = {}
+                nextEid = table.remove(warmQueue, 1)
+                warmAcc = -0.30
+            end
             if not nextEid then
                 warmRunning = false
                 self:Hide()
+                if warmPassChanged and type(AP.InvalidateCaches) == "function" then
+                    warmPassChanged = false
+                    AP:InvalidateCaches(true)
+                end
                 AP:Fire("SERVER_SYNC_UPDATED", "MORKEL_WARM")
                 return
             end
-            if type(SS._ibWarmCache) == "function" then
-                SS._ibWarmCache("item:" .. nextEid)
+            if type(GetItemInfo) == "function" and GetItemInfo(nextEid) then
+                if type(AP.WarmItemStatsFromCache) == "function" and AP:WarmItemStatsFromCache(nextEid) then
+                    warmPassChanged = true
+                end
+            else
+                if type(SS._ibWarmCache) == "function" then
+                    SS._ibWarmCache("item:" .. nextEid)
+                end
+                warmRetry[#warmRetry + 1] = nextEid
             end
             if (#warmQueue % 10) == 0 then
+                if warmPassChanged and type(AP.InvalidateCaches) == "function" then
+                    warmPassChanged = false
+                    AP:InvalidateCaches(true)
+                end
                 AP:Fire("SERVER_SYNC_UPDATED", "MORKEL_WARM")
             end
         end)
@@ -9254,10 +9303,12 @@ do
         function AP:WarmMorKelSetsCache(opts)
             local res = AP:GetMorKelSetsProgress(opts)
             warmQueue = {}
+            warmRetry = {}
+            warmPassChanged = false
             local seen = {}
             for _, g in ipairs(res.groups or {}) do
                 for _, it in ipairs(g.items or {}) do
-                    if it.uncached and not seen[it.eid] then
+                    if (it.uncached or (it.coreStatsSum or 0) == 0) and not seen[it.eid] then
                         seen[it.eid] = true
                         warmQueue[#warmQueue + 1] = it.eid
                     end

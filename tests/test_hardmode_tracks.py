@@ -207,7 +207,8 @@ function CreateFrame(ftype, name, parent, template)
     function f:SetHeight(h) self._h = h end
     function f:GetWidth() return self._w or 800 end
     function f:GetHeight() return self._h or 600 end
-    function f:SetFrameStrata() end
+    function f:SetFrameStrata(s) self._strata = s end
+    function f:GetFrameStrata() return self._strata or "MEDIUM" end
     function f:SetFrameLevel() end
     function f:GetFrameLevel() return 1 end
     function f:SetToplevel() end
@@ -639,7 +640,10 @@ def run_tests():
     assert(AttuneParserFrame.tabPanels.server.wbRows ~= nil, "ServerSync tab was not populated!")
     assert(AttuneParserFrame.tabPanels.sets and AttuneParserFrame.tabPanels.sets.lRows ~= nil and AttuneParserFrame.tabPanels.sets.rRows ~= nil, "MorKel sets tab was not populated!")
 
-    -- Test 6: TalorianTP Track 2 (buffs, retinue, GoldVault, Pepe throttle & mask)
+    -- Test 6: TalorianTP Track 2 (buffs guard before load + bit toggle after state, retinue, GoldVault, Pepe throttle & mask)
+    assert(SC:ToggleTalBuffBit(0, false) == nil, "Must guard buff toggle until ASMSG_TALORIAN_STATE arrives")
+    _G._FireEvent("CHAT_MSG_ADDON", "ASMSG_TALORIAN_STATE", "0 1", "WHISPER", "TestHero")
+    assert(SC.tal.loaded == true, "ASMSG_TALORIAN_STATE must mark SC.tal.loaded")
     SC:ToggleTalBuffBit(0, false)
     SC:ToggleTalBuffBit(1, true)
     SC:ToggleTalBuffBit(3, true)
@@ -2568,6 +2572,31 @@ def run_real_attune_parser_core_tests():
     sp._c2._xpHelpBtn._scripts.OnEnter(sp._c2._xpHelpBtn)
     _G.UnitAura, _G.serverData, AP.mentorWhere, AP.guildAttuneBonusPct, _G.UnitLevel = _oUA, _oSD, _oMW, _oGP, _oUL
 
+    -- Test G (21k core audit fixes): GetItemHyperlink full-link 2nd return, BuildItemTooltip real SetHyperlink,
+    -- StartBackgroundScan restart after completion, ASMSG_FORGE_MAP stale forgeByEntry reset, HIGH strata
+    local gl, gr = AP:GetItemHyperlink(50603, "|cffa335ee|Hitem:50603:0:0:0:0:0:0:0:80|h[Тест]|h|r")
+    assert(gl and gr == "item:50603:0:0:0:0:0:0:0:80", "GetItemHyperlink must extract rawItemStr from full |Hitem link! got=" .. tostring(gr))
+    local tipCalled = nil
+    local mockTip = {
+        ClearLines = function() end,
+        SetHyperlink = function(self, s) tipCalled = s end,
+        NumLines = function() return 3 end,
+        AddLine = function() end,
+        AddDoubleLine = function() end,
+    }
+    AP:BuildItemTooltip(mockTip, 50603, { link = gl, name = "Тест", quality = 4 })
+    assert(tipCalled == "item:50603:0:0:0:0:0:0:0:80", "BuildItemTooltip must invoke SetHyperlink on full hyperlink!")
+
+    assert(AttuneParserFrame and AttuneParserFrame:GetFrameStrata() == "HIGH", "AttuneParserFrame must use HIGH strata!")
+    local scan1 = AP:StartBackgroundScan()
+    AP:StopBackgroundScan()
+    local scan2 = AP:StartBackgroundScan()
+    assert(type(scan1) == "number" and type(scan2) == "number", "StartBackgroundScan must remain restartable")
+
+    AP.forgeByEntry[77701] = 3
+    _G._FireEvent("CHAT_MSG_ADDON", "ASMSG_FORGE_MAP", "E:1:2", "UNKNOWN", UnitName("player"))
+    assert(AP.forgeMapLoaded == true and AP.forgeByEntry[77701] == nil, "ASMSG_FORGE_MAP must clear stale AP.forgeByEntry!")
+
     return "REAL_AP_CORE_PASSED"
     ''')
     print("REAL AP CORE RESULT:", res2)
@@ -2655,6 +2684,61 @@ def run_real_full_integrated_tests():
     assert(af.itemRows[1] and af.itemRows[1]:IsShown() and af.itemRows[1].itemData and (af.itemRows[1].itemData.coreStats or 0) >= 0,
         "Full integrated: Explorer must populate real AttuneParser ZoneItems for ICC!")
     af.itemRows[1]._scripts.OnEnter(af.itemRows[1])
+
+    -- Suite 21k Integrated & TalorianTP audit regressions:
+    -- 1. Frame stratas match HIGH across both addons
+    assert(ui:GetFrameStrata() == "HIGH", "TalorianMainFrame must use HIGH strata!")
+    assert(af:GetFrameStrata() == "HIGH", "TalorianAnalysisFrame must use HIGH strata!")
+    assert(_G.AttuneParserFrame:GetFrameStrata() == "HIGH", "AttuneParserFrame must use HIGH strata!")
+    -- 2. SelectDestInTalorianUI & FindDestByZoneOrName preserve UBRS by name on shared zoneId 1583
+    assert(TalorianTP_SelectZone(1583, "Верхняя часть пика Черной горы") == true)
+    assert(TalorianTP_DB.targetRaid == "Верхняя часть пика Черной горы" and TalorianTP_DB.dungeonEra == "Classic",
+        "UBRS selection on zoneId 1583 must pick UBRS & Classic! got=" .. tostring(TalorianTP_DB.targetRaid))
+    -- 3. Dungeon filter in Explorer hides 3/4 diff buttons & clamps diff > 2
+    local dngBtn, d3Btn
+    for _, b in ipairs(af.kindBtns or {}) do if b.id == "dungeon" then dngBtn = b end end
+    for _, b in ipairs(af.diffBtns or {}) do if b.id == 3 then d3Btn = b end end
+    assert(dngBtn and d3Btn)
+    d3Btn._scripts.OnClick(d3Btn)
+    dngBtn._scripts.OnClick(dngBtn)
+    assert(not d3Btn:IsShown(), "10H/25H diff buttons must hide in Explorer Dungeon mode!")
+    -- 4. ResolveWorldBossName strips |count|flags from AP.Data.Creatures
+    AttuneParser.Data.Creatures[999111] = "ТестБосс|12|0"
+    assert(AttuneParser:GetWorldBossName(999111) == "ТестБосс", "Creature name must strip |count|flags!")
+    AttuneParser.Data.Creatures[999111] = nil
+    -- 5. GetValdrisPickerItems -> EvalItemForValdris handles attun == false as no_attune
+    local _oCAIS2, _oGCS2, _oGCL2, _oGII2 = _G.CustomAttuneItemStatus, _G.GetContainerNumSlots, _G.GetContainerItemLink, _G.GetItemInfo
+    _G.GetContainerNumSlots = function(b) return b == 0 and 1 or 0 end
+    _G.GetContainerItemLink = function(b, s) return (b == 0 and s == 1) and "|cffa335ee|Hitem:999222:0:0:0:0:0:0:0:80|h[НепоглТест]|h|r" or nil end
+    _G.GetItemInfo = function(x)
+        if tostring(x):find("999222", 1, true) then
+            return "НепоглТест", "|cffa335ee|Hitem:999222:0:0:0:0:0:0:0:80|h[НепоглТест]|h|r", 4, 245, 80, "Доспехи", "Латы", 1, "INVTYPE_CHEST", "Interface\\Icons\\INV_Misc_QuestionMark"
+        end
+        return _oGII2(x)
+    end
+    _G.CustomAttuneItemStatus = function(eid)
+        if eid == 999222 then return false, false, 0, false end
+        return _oCAIS2 and _oCAIS2(eid) or false, false, 0, true
+    end
+    local pItems = AttuneParser:GetValdrisPickerItems("bags")
+    _G.CustomAttuneItemStatus, _G.GetContainerNumSlots, _G.GetContainerItemLink, _G.GetItemInfo = _oCAIS2, _oGCS2, _oGCL2, _oGII2
+    assert(pItems and pItems[1] and pItems[1].statusKey == "no_attune",
+        "Valdris picker must classify attun==false as no_attune! got=" .. tostring(pItems and pItems[1] and pItems[1].statusKey))
+    -- 6. TalorianTP_DeleteAllTalorianMacros combat guard & account+char cleanup
+    local _oICL, _oGNM, _oGMI, _oDM = _G.InCombatLockdown, _G.GetNumMacros, _G.GetMacroInfo, _G.DeleteMacro
+    _G.InCombatLockdown = function() return true end
+    local deletedC = TalorianTP_DeleteAllTalorianMacros()
+    assert(deletedC == 0, "DeleteAllTalorianMacros must abort cleanly in combat!")
+    _G.InCombatLockdown = function() return false end
+    local mockMacros = { [1] = "T_ЦЛК", [37] = "T_БВЛ", [38] = "MyCustom" }
+    local deletedIds = {}
+    _G.GetNumMacros = function() return 2, 2 end
+    _G.GetMacroInfo = function(idx) return mockMacros[idx] end
+    _G.DeleteMacro = function(idx) table.insert(deletedIds, idx) end
+    local deletedAll = TalorianTP_DeleteAllTalorianMacros()
+    _G.InCombatLockdown, _G.GetNumMacros, _G.GetMacroInfo, _G.DeleteMacro = _oICL, _oGNM, _oGMI, _oDM
+    assert(deletedAll == 2 and #deletedIds == 2, "DeleteAllTalorianMacros must clean both general and char T_* macros! got=" .. tostring(deletedAll))
+
     return "FULL_INTEGRATED_PASSED"
     ''')
     print("FULL INTEGRATED RESULT:", res4)

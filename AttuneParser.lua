@@ -9,7 +9,7 @@
 local AP = _G.AttuneParser or {}
 _G.AttuneParser = AP
 
-AP.VERSION = "1.2.0"
+AP.VERSION = "1.2.1"
 AP.Data = AP.Data or {}
 
 -- User-confirmed server tier defaults (replaced live when ASMSG_ATTUNE_TIERS arrives)
@@ -665,7 +665,7 @@ do
 
         function AP:GetItemHyperlink(itemId, sfxOrLink, nameHint, qualHint)
             if type(sfxOrLink) == "string" and sfxOrLink:find("|Hitem:%d+", 1, false) then
-                return sfxOrLink
+                return sfxOrLink, sfxOrLink:match("|H(item:[^|]+)|h")
             end
             local eid = AP.ExtractItemId(itemId)
             if not eid then return nil, nil end
@@ -782,8 +782,9 @@ do
 
             tt:ClearLines()
             local setOk = false
-            if rawItemStr then
-                setOk = pcall(tt.SetHyperlink, tt, rawItemStr)
+            local tipLink = rawItemStr or fullLink
+            if tipLink then
+                setOk = pcall(tt.SetHyperlink, tt, tipLink)
             end
             if (not setOk) or (tt:NumLines() <= 1) then
                 tt:ClearLines()
@@ -1133,40 +1134,42 @@ do
             if okn and na then excluded = true end
         end
 
-        -- Scan tooltip ONLY for class restriction and random-enchant detection when cached
+        -- Scan tooltip ONLY for class restriction and random-enchant detection when cached & out of combat
         local allowCls = -1
         local isRand = false
-        scanTip:SetOwner(UIParent, "ANCHOR_NONE")
-        scanTip:ClearLines()
-        local okt = pcall(function() scanTip:SetHyperlink(targetLink) end)
-        if okt then
-            local fmt = ITEM_CLASSES_ALLOWED or "Классы: %s"
-            local clsPrefix = fmt:match("^(.-)%%s") or "Классы: "
-            local cmap = GetClassNameMap()
-            local bits = CLASS_BIT
-            local rndTxt = ITEM_RANDOM_ENCHANT or "Случайное усиление"
-            for i = 2, (scanTip:NumLines() or 0) do
-                local fs = _G["AttuneParserScanTipTextLeft" .. i]
-                local txt = fs and fs:GetText()
-                if txt then
-                    if txt:sub(1, #clsPrefix) == clsPrefix then
-                        local list = txt:sub(#clsPrefix + 1)
-                        local mask = 0
-                        local allKnown = true
-                        for cnm in list:gmatch("[^,]+") do
-                            local cnmTrim = cnm:gsub("^%s+", ""):gsub("%s+$", "")
-                            local tok = cmap[cnmTrim]
-                            if tok and bits[tok] then
-                                mask = mask + bits[tok]
-                            else
-                                allKnown = false
+        if not (InCombatLockdown and InCombatLockdown()) then
+            scanTip:SetOwner(UIParent, "ANCHOR_NONE")
+            scanTip:ClearLines()
+            local okt = pcall(function() scanTip:SetHyperlink(targetLink) end)
+            if okt then
+                local fmt = ITEM_CLASSES_ALLOWED or "Классы: %s"
+                local clsPrefix = fmt:match("^(.-)%%s") or "Классы: "
+                local cmap = GetClassNameMap()
+                local bits = CLASS_BIT
+                local rndTxt = ITEM_RANDOM_ENCHANT or "Случайное усиление"
+                for i = 2, (scanTip:NumLines() or 0) do
+                    local fs = _G["AttuneParserScanTipTextLeft" .. i]
+                    local txt = fs and fs:GetText()
+                    if txt then
+                        if txt:sub(1, #clsPrefix) == clsPrefix then
+                            local list = txt:sub(#clsPrefix + 1)
+                            local mask = 0
+                            local allKnown = true
+                            for cnm in list:gmatch("[^,]+") do
+                                local cnmTrim = cnm:gsub("^%s+", ""):gsub("%s+$", "")
+                                local tok = cmap[cnmTrim]
+                                if tok and bits[tok] then
+                                    mask = mask + bits[tok]
+                                else
+                                    allKnown = false
+                                end
                             end
+                            if allKnown and mask > 0 then
+                                allowCls = mask
+                            end
+                        elseif (txt:find(rndTxt, 1, true) or txt:find("<Случайные", 1, true) or txt:find("Random enchantment", 1, true)) and not link then
+                            isRand = true
                         end
-                        if allKnown and mask > 0 then
-                            allowCls = mask
-                        end
-                    elseif (txt:find(rndTxt, 1, true) or txt:find("<Случайные", 1, true) or txt:find("Random enchantment", 1, true)) and not link then
-                        isRand = true
                     end
                 end
             end
@@ -1828,6 +1831,7 @@ do
         end
         return 0
     end
+    AP.InferRuntimeDiffMask = InferRuntimeDiffMask
 
     local DIFF_LONG_4 = { [8] = "25 гер", [4] = "10 гер", [2] = "25 об", [1] = "10 об" }
     local DIFF_SHORT_4 = { [8] = "25г", [4] = "10г", [2] = "25о", [1] = "10о" }
@@ -2491,11 +2495,17 @@ do
         if itemTier == nil then
             if whereLabel == "equip" then
                 itemTier = AP.forgeEquip[slot]
-            elseif whereLabel == "bag" or whereLabel == "bank" then
+                if itemTier == nil and not AP.forgeMapLoaded then itemTier = AP.forgeByEntry[eid] end
+            elseif whereLabel == "bag" then
                 itemTier = AP.forgeBag[bag] and AP.forgeBag[bag][slot]
-            end
-            if itemTier == nil then
-                itemTier = AP.forgeByEntry[eid]
+                if itemTier == nil and not AP.forgeMapLoaded then itemTier = AP.forgeByEntry[eid] end
+            else
+                if whereLabel == "bank" then
+                    itemTier = AP.forgeBag[bag] and AP.forgeBag[bag][slot]
+                end
+                if itemTier == nil then
+                    itemTier = AP.forgeByEntry[eid]
+                end
             end
         end
         itemTier = itemTier or 0
@@ -3447,6 +3457,7 @@ do
                 if ext then
                     AttuneParserDB.itemStats[eid] = ext
                     AP._mem.itemMetaCache[eid] = nil
+                    if AP._mem.absorbCache then AP._mem.absorbCache()[eid] = nil end
                     warmAnyChanged = true
                 end
             else
@@ -3476,8 +3487,25 @@ do
         return #warmZoneQueue
     end
 
+    function AP:WarmItemStatsFromCache(eid)
+        eid = AP.ExtractItemId(eid)
+        if not eid then return false end
+        if InCombatLockdown and InCombatLockdown() then return false end
+        local name = GetItemInfo(eid)
+        if not name then return false end
+        local ext = AP.ExtractLiveStatsAndMeta(eid, nil)
+        if not ext then return false end
+        AttuneParserDB = AttuneParserDB or {}
+        AttuneParserDB.itemStats = AttuneParserDB.itemStats or {}
+        AttuneParserDB.itemStats[eid] = ext
+        AP._mem.itemMetaCache[eid] = nil
+        if AP._mem.absorbCache then AP._mem.absorbCache()[eid] = nil end
+        AP:InvalidateItemStatus(eid)
+        return true
+    end
+
     function AP:StartBackgroundScan()
-        if #warmQueue == 0 then BuildWarmQueue() end
+        if #warmQueue == 0 or warmIdx > #warmQueue then BuildWarmQueue() end
         if #warmQueue == 0 then return 0 end
         warmActive = true
         warmDriver:Show()
@@ -3818,6 +3846,8 @@ do
         elseif prefix == "ASMSG_FORGE_MAP" then
             AP.forgeEquip = {}
             AP.forgeBag = {}
+            AP.forgeByEntry = {}
+            AP.forgeMapLoaded = true
             for _, rec in ipairs({ strsplit(";", msg) }) do
                 if rec ~= "" then
                     local a, b, c, d = strsplit(":", rec)
@@ -4476,7 +4506,7 @@ do
                     i, z.zoneName, z.newCount, z.newImmediateStats, z.newMaxStats, z.forgeCount
                 ))
             end
-        elseif msg == "forge" then
+        elseif msg == "topforge" then
             local list = AP:GetRecommendations({ mode = "forge", onlyInstances = true, limit = 8 })
             DEFAULT_CHAT_FRAME:AddMessage("|cffffd200[AttuneParser] Топ инстов (Ковка до Титанического 90%%):|r")
             for i, z in ipairs(list) do
@@ -4499,7 +4529,7 @@ do
             AP:InvalidateCaches(false)
             local n = AP:StartBackgroundScan()
             DEFAULT_CHAT_FRAME:AddMessage("|cff38bdf8[AttuneParser]|r Фоновый до-скан запущен (" .. n .. " предметов вне кэша).")
-        elseif msg == "bags" then
+        elseif msg == "bagslist" or msg == "bags" then
             local rawCands = AP:GetOwnedUpgradeCandidates(nil, true)
             local cands = {}
             for _, it in ipairs(rawCands) do

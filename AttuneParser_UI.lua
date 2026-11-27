@@ -237,7 +237,9 @@ do
                 bar:Hide()
             else
                 bar:Show()
-                local trackH = math.max(24, (bar:GetHeight() or listHeight) - 34)
+                local bh = bar:GetHeight()
+                if not bh or bh <= 1 then bh = listHeight end
+                local trackH = math.max(24, bh - 34)
                 local thumbH = math.max(18, math.floor(trackH * (visCount / math.max(1, sf.total))))
                 if thumbH > trackH then thumbH = trackH end
                 thumb:SetHeight(thumbH)
@@ -2182,7 +2184,8 @@ local function BuildSetsTab(parent)
 
         r.progTxt = r:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
         r.progTxt:SetPoint("TOPLEFT", r.nameTxt, "BOTTOMLEFT", 0, -3)
-        r.progTxt:SetSize(188, 14)
+        r.progTxt:SetPoint("RIGHT", r, "RIGHT", -8, 0)
+        r.progTxt:SetHeight(14)
         r.progTxt:SetJustifyH("LEFT")
         if r.progTxt.SetWordWrap then r.progTxt:SetWordWrap(false) end
 
@@ -2480,15 +2483,15 @@ local function BuildSettingsTab(parent)
     talInfo:SetJustifyH("LEFT")
 
     local testTalBtn = PS.MakeBtn(rightCard, 180, 24, "Открыть окно Талориана", "green")
-    testTalBtn:SetPoint("TOPLEFT", rightCard, "TOPLEFT", 12, -264)
+    testTalBtn:SetPoint("TOPLEFT", rightCard, "TOPLEFT", 12, -278)
     testTalBtn:SetScript("OnClick", function() AP:OpenTalorianUI() end)
 
     local srvHdr = rightCard:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    srvHdr:SetPoint("TOPLEFT", 12, -296)
+    srvHdr:SetPoint("TOPLEFT", 12, -310)
     srvHdr:SetText("|cffffd200Автопоглощение и автопродажа|r")
 
     local srvAutoBtn = PS.MakeBtn(rightCard, 166, 22, "Автопоглощение: ?", "dark")
-    srvAutoBtn:SetPoint("TOPLEFT", rightCard, "TOPLEFT", 12, -318)
+    srvAutoBtn:SetPoint("TOPLEFT", rightCard, "TOPLEFT", 12, -332)
     srvAutoBtn:SetScript("OnClick", function()
         local as = AP:GetAutoSwapSummary()
         AP:SetAutoAbsorb(not (as.on == true))
@@ -2504,7 +2507,7 @@ local function BuildSettingsTab(parent)
     end)
 
     local srvSellBtn = PS.MakeBtn(rightCard, 298, 22, "Автопродажа поглощенных: ?", "dark")
-    srvSellBtn:SetPoint("TOPLEFT", rightCard, "TOPLEFT", 12, -346)
+    srvSellBtn:SetPoint("TOPLEFT", rightCard, "TOPLEFT", 12, -360)
     srvSellBtn:SetScript("OnClick", function()
         local as = AP:GetAutoSwapSummary()
         if not as.unlocked then
@@ -2587,7 +2590,7 @@ local function CreateMainWindow()
     local f = CreateFrame("Frame", "AttuneParserFrame", UIParent)
     f:SetSize(780, 580)
     f:SetPoint("CENTER")
-    f:SetFrameStrata("MEDIUM")
+    f:SetFrameStrata("HIGH")
     f:SetToplevel(true)
     f:EnableMouse(true)
     f:SetMovable(true)
