@@ -9,7 +9,7 @@
 local AP = _G.AttuneParser or {}
 _G.AttuneParser = AP
 
-AP.VERSION = "1.1.4"
+AP.VERSION = "1.2.0"
 AP.Data = AP.Data or {}
 
 -- User-confirmed server tier defaults (replaced live when ASMSG_ATTUNE_TIERS arrives)
@@ -100,6 +100,106 @@ AP.FORGE_ITEM_IDS = {
     frostEmblem = 49426,
     triumphEmblem = 47241,
 }
+
+AP.ZONE_ICONS = {
+    [206]  = "Achievement_Dungeon_UtgardeKeep_Normal",
+    [207]  = "INV_Misc_Map_01",
+    [209]  = "Achievement_Boss_ArchmageArugal",
+    [491]  = "Achievement_Boss_CharlgaRazorflank",
+    [717]  = "Achievement_Boss_Bazil_Thredd",
+    [718]  = "Achievement_Boss_Mutanus_the_Devourer",
+    [719]  = "Achievement_Boss_Bazil_Akumai",
+    [721]  = "INV_Misc_Head_Gnome_01",
+    [722]  = "Achievement_Boss_Amnennar_the_Coldbringer",
+    [796]  = "Spell_Holy_SealOfFury",
+    [1176] = "Achievement_Boss_ChiefUkorzSandscalp",
+    [1196] = "Achievement_Dungeon_UtgardePinnacle_Normal",
+    [1337] = "Achievement_Boss_Archaedas",
+    [1417] = "Achievement_Boss_ShadeOfEranikus",
+    [1581] = "Achievement_Boss_EdwinVancleef",
+    [1583] = "Achievement_Boss_GeneralDrakkisath",
+    [1584] = "Achievement_Boss_EmperorDagranThaurissan",
+    [1977] = "Achievement_Boss_Hakkar",
+    [2017] = "Achievement_Zone_EasternPlaguelands",
+    [2057] = "INV_Misc_Book_11",
+    [2100] = "Achievement_Boss_PrincessTheradras",
+    [2159] = "Achievement_Boss_Onyxia",
+    [2366] = "Achievement_Boss_Aeonus_01",
+    [2367] = "Achievement_Boss_EpochHunter",
+    [2437] = "Achievement_Zone_Durotar",
+    [2557] = "Achievement_Zone_Feralas",
+    [2677] = "Achievement_Boss_Nefarion",
+    [2717] = "Achievement_Boss_Ragnaros",
+    [3428] = "Achievement_Boss_CThun",
+    [3429] = "Achievement_Boss_OssirianTheUnscarred",
+    [3456] = "Achievement_Dungeon_Naxxramas_Normal",
+    [3457] = "Achievement_Boss_PrinceMalchezaar_02",
+    [3535] = "Spell_Shadow_DeathCoil",
+    [3562] = "Achievement_Boss_OmarTheUnscarred_01",
+    [3606] = "INV_Offhand_Hyjal_D_01",
+    [3607] = "Achievement_Boss_LadyVashj",
+    [3713] = "Achievement_Boss_KelidanTheBreaker",
+    [3714] = "Achievement_Boss_KargathBladefist_01",
+    [3715] = "Achievement_Boss_Warlord_Kalithresh",
+    [3716] = "Achievement_Boss_TheBlackStalker",
+    [3717] = "Achievement_Boss_Quagmirran",
+    [3789] = "Achievement_Boss_Murmur",
+    [3790] = "Achievement_Boss_Exarch_Maladaar",
+    [3791] = "Achievement_Boss_TalonKingIkiss",
+    [3792] = "Achievement_Boss_Nexus_Prince_Shaffar",
+    [3805] = "Achievement_Boss_Zuljin",
+    [3836] = "Achievement_Boss_Magtheridon",
+    [3842] = "Spell_Arcane_PortalShattrath",
+    [3845] = "Achievement_Boss_Kael'thasSunstrider_01",
+    [3847] = "Achievement_Boss_WarpSplinter",
+    [3848] = "Achievement_Boss_Harbinger_Skyriss",
+    [3849] = "Achievement_Boss_PathaleonTheCalculator",
+    [3923] = "Achievement_Boss_GruulTheDragonkiller",
+    [3959] = "Achievement_Boss_Illidan",
+    [4075] = "Achievement_Boss_Kiljaedan",
+    [4100] = "Achievement_Dungeon_CoTStratholme_Normal",
+    [4131] = "Achievement_Boss_Kael'thasSunstrider_01",
+    [4196] = "Achievement_Dungeon_Drak'Tharon_Normal",
+    [4228] = "Achievement_Dungeon_Nexus80_Normal",
+    [4264] = "Achievement_Dungeon_Ulduar77_Normal",
+    [4265] = "Achievement_Dungeon_Nexus70_Normal",
+    [4272] = "Achievement_Dungeon_Ulduar80_Normal",
+    [4273] = "Achievement_Dungeon_UlduarRaid_Misc_01",
+    [4277] = "Achievement_Dungeon_AzjolLowercity_Normal",
+    [4415] = "Achievement_Dungeon_TheVioletHold_Normal",
+    [4416] = "Achievement_Dungeon_Gundrak_Normal",
+    [4493] = "Achievement_Boss_Sartharion_01",
+    [4494] = "Achievement_Dungeon_AzjolUppercity_Normal",
+    [4500] = "Achievement_Boss_Malygos_01",
+    [4603] = "INV_Misc_Statue_07",
+    [4722] = "Achievement_Reputation_ArgentCrusader",
+    [4723] = "Achievement_Reputation_ArgentCrusader",
+    [4809] = "Achievement_Dungeon_Icecrown_ForgeofSouls",
+    [4812] = "Achievement_Boss_LichKing",
+    [4813] = "Achievement_Dungeon_Icecrown_PitofSaron",
+    [4820] = "Achievement_Dungeon_Icecrown_HallsofReflection",
+    [4987] = "Spell_Shadow_Twilight",
+}
+
+function AP.FormatMult(m)
+    m = tonumber(m) or 1
+    local s = string.format("%.2f", m)
+    s = s:gsub("0+$", ""):gsub("%.$", "")
+    return (s == "" or s == "-0") and "1" or s
+end
+
+function AP:GetZoneIcon(zoneId, isRaid, isInstanceZone)
+    local ic = AP.ZONE_ICONS and AP.ZONE_ICONS[zoneId]
+    if ic then
+        return ic:find("\\", 1, true) and ic or ("Interface\\Icons\\" .. ic)
+    end
+    if isRaid == true then
+        return "Interface\\Icons\\Achievement_Dungeon_GloryoftheRaider"
+    elseif isInstanceZone ~= false then
+        return "Interface\\Icons\\Achievement_Dungeon_Heroic_GloryoftheHero"
+    end
+    return "Interface\\Icons\\INV_Misc_Map_01"
+end
 
 -- ============================================================================
 -- Module 1: Scheduler, Callbacks, Helpers & Memoization Caches
@@ -2745,18 +2845,33 @@ do
         local gKey, gName, gIcon, gSpell, gIdx = nil, nil, nil, nil, nil
         local hasElixir = false
         local hasExpElixir = false
-        if type(UnitAura) == "function" then
+        local hasExpHoliday = false
+        local hasNewbieBless = false
+        local hasAuraFn = (type(UnitAura) == "function")
+        if hasAuraFn then
             for i = 1, 40 do
                 local nm, _, ic, _, _, _, _, _, _, _, sid = UnitAura("player", i, "HELPFUL")
                 if not nm then break end
                 local dk = AP.DAILY_GIFT_NAMES[nm]
-                if not dk and sid == 900204 then dk = "thu" end
+                if not dk then
+                    if sid == 900204 then
+                        dk = "thu"
+                    elseif sid == 900206 or sid == 900214 then
+                        dk = "sat"
+                    elseif sid == 900207 then
+                        dk = "sun"
+                    end
+                end
                 if dk then
                     gKey, gName, gIcon, gSpell, gIdx = dk, nm, ic, sid, i
-                elseif nm:find("Эликсир поглощения", 1, true) then
+                elseif sid == 900210 or nm:find("Эликсир поглощения", 1, true) then
                     hasElixir = true
-                elseif sid == 900211 or nm:find("Эликсир двойного опыта", 1, true) or sid == 900125 or sid == 1040174 or sid == 1040079 then
+                elseif sid == 900211 or nm:find("Эликсир двойного опыта", 1, true) then
                     hasExpElixir = true
+                elseif sid == 900125 or nm:find("Праздник опыта", 1, true) then
+                    hasExpHoliday = true
+                elseif sid == 1040174 or sid == 1040079 or nm:find("Благословение новичка", 1, true) then
+                    hasNewbieBless = true
                 end
             end
         end
@@ -2780,9 +2895,15 @@ do
             end
         end
 
+        local mw = AP.mentorWhere
         local isWed = (gKey == "wed")
         local isThu = (gKey == "thu" or gSpell == 900204)
-        local isSat = (gKey == "sat")
+        local isSat = (gKey == "sat" or gSpell == 900206 or gSpell == 900214)
+        local isSun = (gKey == "sun" or gSpell == 900207)
+        if not hasAuraFn and mw and mw.v2 then
+            if (mw.gift or 0) > 0 then isSat = true end
+            if (mw.elixir or 0) > 0 then hasElixir = true end
+        end
         local xpMult = 1 + (isSat and 1 or 0) + (hasElixir and 1 or 0)
 
         local res = {
@@ -2797,8 +2918,11 @@ do
             isWednesday = isWed,
             isThursday = isThu,
             isSaturday = isSat,
+            isSunday = isSun,
             hasElixir = hasElixir,
             hasExpElixir = hasExpElixir,
+            hasExpHoliday = hasExpHoliday,
+            hasNewbieBless = hasNewbieBless,
             xpMult = xpMult,
             vendorRefundPct = isThu and 100 or 50,
             remSeconds = remSec,
@@ -2869,64 +2993,129 @@ do
         return math.floor(0.24 * ilvl * ilvl + 0.5)
     end
 
-    local function ResolveGuildAttuneBonus()
-        if AP.mentorWhere and AP.mentorWhere.v2 then
-            return AP.guildAttuneBonusPct or 0, true
-        end
+    local GUILD_ATTUNE_PERKS = { [900063] = 5, [900061] = 10, [900064] = 25 }
+    local GUILD_EXP_PERKS = { [900065] = 5, [900066] = 10, [900067] = 15, [900068] = 25 }
+
+    local function ScanGuildPerkBonuses()
         if type(IsInGuild) == "function" and not IsInGuild() then
-            return 0, true
+            return 0, 0, true
         end
         if type(IsInGuild) ~= "function" then
-            return AP.guildAttuneBonusPct or 0, (AP.guildAttuneBonusPct or 0) > 0
+            return AP.guildAttuneBonusPct or 0, giftCache.guildExpPct or 0, (AP.guildAttuneBonusPct or 0) > 0
         end
         local gLvl = (type(GetGuildXP) == "function") and tonumber((GetGuildXP())) or nil
         local nPerks = (type(GetGuildNumPerks) == "function") and (tonumber(GetGuildNumPerks()) or 0) or 0
         if not gLvl or nPerks <= 0 or type(GetGuildPerks) ~= "function" then
             if (AP.guildAttuneBonusPct or 0) > 0 then
-                return AP.guildAttuneBonusPct, true
+                return AP.guildAttuneBonusPct, giftCache.guildExpPct or 0, true
             end
-            return 0, false
+            return 0, 0, false
         end
         local cacheKey = gLvl .. ":" .. nPerks
         if giftCache.guildBonusKey == cacheKey and giftCache.guildBonusPct ~= nil then
-            return giftCache.guildBonusPct, true
+            return giftCache.guildBonusPct, giftCache.guildExpPct or 0, true
         end
-        if InCombatLockdown and InCombatLockdown() then
-            return AP.guildAttuneBonusPct or 0, false
-        end
-        local tip = _G.AttuneParserScanTip
-        if not tip then
-            return AP.guildAttuneBonusPct or 0, false
-        end
-        local best = 0
+        local bestAttune, bestExp = 0, 0
+        local needTip = false
         for i = 1, nPerks do
             local sid, reqLvl = GetGuildPerks(i)
             if sid and (not reqLvl or gLvl >= reqLvl) then
-                local spLink = (type(GetSpellLink) == "function" and GetSpellLink(sid)) or ("spell:" .. sid)
-                tip:SetOwner(UIParent, "ANCHOR_NONE")
-                tip:ClearLines()
-                local ok = pcall(tip.SetHyperlink, tip, spLink)
-                if ok then
-                    for li = 1, (tip:NumLines() or 0) do
-                        local fs = _G["AttuneParserScanTipTextLeft" .. li]
-                        local txt = fs and fs:GetText()
-                        if txt and txt:find("поглощ", 1, true) then
-                            local pct = tonumber(txt:match("(%d+)%%"))
-                            if pct and pct > best then
-                                best = pct
+                if GUILD_ATTUNE_PERKS[sid] then
+                    if GUILD_ATTUNE_PERKS[sid] > bestAttune then bestAttune = GUILD_ATTUNE_PERKS[sid] end
+                elseif GUILD_EXP_PERKS[sid] then
+                    if GUILD_EXP_PERKS[sid] > bestExp then bestExp = GUILD_EXP_PERKS[sid] end
+                else
+                    needTip = true
+                end
+            end
+        end
+        if needTip and not (InCombatLockdown and InCombatLockdown()) and _G.AttuneParserScanTip then
+            local tip = _G.AttuneParserScanTip
+            for i = 1, nPerks do
+                local sid, reqLvl = GetGuildPerks(i)
+                if sid and (not reqLvl or gLvl >= reqLvl) and not GUILD_ATTUNE_PERKS[sid] and not GUILD_EXP_PERKS[sid] then
+                    local spLink = (type(GetSpellLink) == "function" and GetSpellLink(sid)) or ("spell:" .. sid)
+                    tip:SetOwner(UIParent, "ANCHOR_NONE")
+                    tip:ClearLines()
+                    local ok = pcall(tip.SetHyperlink, tip, spLink)
+                    if ok then
+                        for li = 1, (tip:NumLines() or 0) do
+                            local fs = _G["AttuneParserScanTipTextLeft" .. li]
+                            local txt = fs and fs:GetText()
+                            if txt then
+                                if txt:find("поглощ", 1, true) then
+                                    local pct = tonumber(txt:match("(%d+)%%"))
+                                    if pct and pct > bestAttune then bestAttune = pct end
+                                elseif txt:find("Опытност", 1, true) or (txt:find("опыт", 1, true) and not txt:find("гильди", 1, true)) then
+                                    local pct = tonumber(txt:match("(%d+)%%"))
+                                    if pct and pct > bestExp then bestExp = pct end
+                                end
                             end
                         end
                     end
+                    tip:Hide()
                 end
-                tip:Hide()
             end
+        elseif needTip and (InCombatLockdown and InCombatLockdown()) then
+            return AP.guildAttuneBonusPct or bestAttune, giftCache.guildExpPct or bestExp, false
         end
         giftCache.guildBonusKey = cacheKey
-        giftCache.guildBonusPct = best
-        if best > (AP.guildAttuneBonusPct or 0) then
-            AP.guildAttuneBonusPct = best
+        giftCache.guildBonusPct = bestAttune
+        giftCache.guildExpPct = bestExp
+        if bestAttune > (AP.guildAttuneBonusPct or 0) then
+            AP.guildAttuneBonusPct = bestAttune
         end
-        return best, true
+        return bestAttune, bestExp, true
+    end
+
+    local function ResolveGuildAttuneBonus()
+        local gAtt, _, gKnown = ScanGuildPerkBonuses()
+        if AP.mentorWhere and AP.mentorWhere.v2 then
+            return AP.guildAttuneBonusPct or gAtt or 0, true
+        end
+        return gAtt, gKnown
+    end
+
+    function AP:GetParagonXPBreakdown()
+        local gift = AP:GetActiveDailyGift(false)
+        local eq = AP:GetEquippedAttuneProgress()
+        local _, gExpPct, gKnown = ScanGuildPerkBonuses()
+        local sd = rawget(_G, "serverData")
+        local x2Sources = {}
+        if gift.hasExpElixir then table.insert(x2Sources, "Эликсир двойного опыта") end
+        if gift.isSunday then table.insert(x2Sources, "Дар Воскресенья") end
+        if gift.hasExpHoliday then table.insert(x2Sources, "Праздник опыта") end
+        if gift.hasNewbieBless then table.insert(x2Sources, "Благословение новичка") end
+        local sdX2 = (type(sd) == "table" and tonumber(sd.x2) and tonumber(sd.x2) > 0) and true or false
+        if #x2Sources == 0 and sdX2 then
+            table.insert(x2Sources, tostring(sd.x2src or "Бонус x2"))
+        end
+        local hasX2 = (#x2Sources > 0) or sdX2
+        local x2Mult = hasX2 and 2 or 1
+        local perkPts = (type(sd) == "table" and type(sd.stats) == "table") and tonumber(sd.stats[19]) or nil
+        local perkPct = perkPts and (perkPts * 0.5) or 0
+        local mapXP = (type(sd) == "table" and tonumber(sd.mapXP)) or 100
+        if mapXP <= 0 then mapXP = 100 end
+        local mobMultBase = x2Mult * (1 + perkPct / 100) * (mapXP / 100)
+        return {
+            attuneMult = eq.xpMult or 1,
+            attuneIsSaturday = eq.isSaturday == true,
+            attuneHasElixir = eq.hasElixir == true,
+            attuneGuildPct = eq.guildPct or 0,
+            attuneGuildKnown = eq.guildKnown ~= false,
+            paragonX2Active = hasX2,
+            paragonX2Mult = x2Mult,
+            paragonX2Source = x2Sources[1],
+            paragonX2Sources = x2Sources,
+            paragonX2Wasted = (#x2Sources > 1),
+            paragonPerkPts = perkPts,
+            paragonPerkPct = perkPct,
+            paragonMapXP = mapXP,
+            paragonMobMult = mobMultBase,
+            guildExpPct = gExpPct or 0,
+            guildExpKnown = gKnown,
+            hasExpElixir = gift.hasExpElixir == true,
+        }
     end
 
     function AP:GetEquippedAttuneProgress()
@@ -4349,9 +4538,11 @@ do
                 DEFAULT_CHAT_FRAME:AddMessage("|cff38bdf8[AttuneParser]|r Активный Дар недели на персонаже не найден.")
             end
             local guildChatStr = (eq.guildKnown == false) and "?" or string.format("+%d%%", eq.guildPct or 0)
-            DEFAULT_CHAT_FRAME:AddMessage(string.format("  Пыль: Мерцающая=%d, Пылающая=%d, Астральная=%d (обмен 3:1: Астральная +%d, всего Титан=%d) | Сундуки=%d | Опыт поглощения x%.2g (Гильдия %s) | Эликсир поглощения=%s | Эликсир опыта=%s",
-                st.dustEpic, st.dustLeg, st.dustTit, st.craftableTit or 0, st.totalTitPotential or 0, st.titanBoxes,
-                eq.xpMult or 1, guildChatStr, g.hasElixir and "ДА" or "нет", g.hasExpElixir and "ДА(x2)" or "нет"))
+            local px = AP:GetParagonXPBreakdown()
+            DEFAULT_CHAT_FRAME:AddMessage(string.format("  Пыль: Мерцающая=%d, Пылающая=%d, Астральная=%d (обмен %d:1/%d:1: Астральная +%d, Титан=%d) | Сундуки=%d | Поглощение x%s (Гильдия %s%s%s) | Paragon x%s (%s)",
+                st.dustEpic, st.dustLeg, st.dustTit, st.rate1 or 3, st.rate2 or 3, st.craftableTit or 0, st.totalTitPotential or 0, st.titanBoxes,
+                AP.FormatMult(eq.xpMult or 1), guildChatStr, g.isSaturday and ", Дар Субботы x2" or "", g.hasElixir and ", Эликс. погл. x2" or "",
+                AP.FormatMult(px.paragonMobMult or 1), px.paragonX2Active and (px.paragonX2Source or "x2") or "база"))
         elseif msg == "info" or msg == "spec" then
             local cat = AP:GetAccountCatalogSummary()
             local par = AP:GetParagonInfo()

@@ -461,6 +461,19 @@ function AP:InvalidateCaches() end
 function AP:BuildItemTooltip() end
 function AP:GetAvailableEras() return { "All" } end
 function AP:GetZonesList() return {} end
+function AP.FormatMult(m)
+    m = tonumber(m) or 1
+    local s = string.format("%.2f", m):gsub("0+$", ""):gsub("%.$", "")
+    return s == "" and "1" or s
+end
+function AP:GetZoneIcon() return "Interface\\Icons\\INV_Misc_Map_01" end
+function AP:GetParagonXPBreakdown()
+    return {
+        attuneMult = 1, attuneIsSaturday = false, attuneHasElixir = false, attuneGuildPct = 0, attuneGuildKnown = true,
+        paragonX2Active = false, paragonX2Mult = 1, paragonX2Sources = {}, paragonX2Wasted = false,
+        paragonPerkPts = nil, paragonPerkPct = 0, paragonMapXP = 100, paragonMobMult = 1, guildExpPct = 0, guildExpKnown = true,
+    }
+end
 function AP:GetLockedZonesMap() return {} end
 function AP:GetBagItemsStatus() return { readyToAbsorb = {}, completedItems = {}, newItems = {}, forgeItems = {} } end
 SLASH_ATTUNEPARSER1 = "/ap"
@@ -2480,6 +2493,80 @@ def run_real_attune_parser_core_tests():
         if fr and fr:IsShown() and fr._scripts and fr._scripts.OnUpdate then fr._scripts.OnUpdate(fr, 0.05) end
     end
     assert((_G.AttuneParserFrame._raisedAt or 0) > 100, "Core AP:OpenUI must call Raise() on AttuneParserFrame!")
+
+    -- Test F (21j core): Zone icons, Kind/Dungeon filter fix, Difficulty selector, and Attune vs Paragon XP rules
+    assert(AP.FormatMult(1.25) == "1.25" and AP.FormatMult(1.2) == "1.2" and AP.FormatMult(2.0) == "2" and AP.FormatMult(3.75) == "3.75",
+        "AP.FormatMult must preserve exact decimals without 2-sig-digit truncation!")
+    assert(AP:GetZoneIcon(4812, true, true) == "Interface\\Icons\\Achievement_Boss_LichKing", "Missing ICC icon in AP.ZONE_ICONS")
+    assert(AP:GetZoneIcon(4809, false, true) == "Interface\\Icons\\Achievement_Dungeon_Icecrown_ForgeofSouls", "Missing FoS icon in AP.ZONE_ICONS")
+    local _oUL = _G.UnitLevel
+    _G.UnitLevel = function() return 80 end
+    AP:SetSetting("topMode", "new")
+    AP:SetSetting("kindFilter", "All")
+    AP:SetSetting("diffFilter", 0)
+    AP:InvalidateCaches(true)
+    AP:OpenUI("top")
+    local tp = AttuneParserFrame and AttuneParserFrame.tabPanels and AttuneParserFrame.tabPanels.top
+    assert(tp and tp._kindBtn and tp._diffBtn, "TopTab must expose _kindBtn and _diffBtn!")
+    -- Click Kind once -> Raid, click again -> Dungeon
+    tp._kindBtn._scripts.OnClick(tp._kindBtn, "LeftButton")
+    assert(AP:GetSetting("kindFilter") == "Raid", "First Kind click must switch to Raid")
+    assert(#(tp.data or {}) > 0, "Raid list must not be empty")
+    for _, rowD in ipairs(tp.data) do
+        assert(rowD.kind == "zone" and rowD.zone.isRaid == true, "Raid filter must only return raids!")
+    end
+    tp._kindBtn._scripts.OnClick(tp._kindBtn, "LeftButton")
+    assert(AP:GetSetting("kindFilter") == "Dungeon", "Second Kind click must switch to Dungeon")
+    assert(#(tp.data or {}) > 0, "Dungeon list must not be empty")
+    for _, rowD in ipairs(tp.data) do
+        assert(rowD.kind == "zone" and rowD.zone.isRaid == false,
+            "Dungeon filter must NEVER leak raids (false or nil regression)! leaked=" .. tostring(rowD.zone.zoneName))
+    end
+    assert(tp.rows[1] and tp.rows[1].ic and tp.rows[1].ic._tex and tp.rows[1].ic._tex:find("Interface\\Icons\\", 1, true),
+        "Top row must render zone icon texture! got=" .. tostring(tp.rows[1] and tp.rows[1].ic and tp.rows[1].ic._tex))
+    assert(tp.rows[1].progTxt:GetText():find("%%", 1, false), "Top row progress bar must show pct text!")
+    -- Switch to All and cycle diff to 4 (25 heroic)
+    tp._kindBtn._scripts.OnClick(tp._kindBtn, "LeftButton")
+    assert(AP:GetSetting("kindFilter") == "All")
+    AP:SetSetting("diffFilter", 4)
+    tp.RefreshData()
+    assert(#(tp.data or {}) > 0, "25H diffFilter must return 4-diff raids")
+    for _, rowD in ipairs(tp.data) do
+        assert((rowD.zone.maxDiffs or 1) >= 4, "25H diffFilter must exclude 1-diff/2-diff instances! got=" .. tostring(rowD.zone.zoneName))
+    end
+    assert(tp.rows[1].subTxt:GetText():find("25 гер", 1, true), "Top row subline must reflect active 25 гер difficulty filter!")
+    AP:SetSetting("diffFilter", 0)
+
+    -- Attune vs Paragon XP rules: Sat + Attune Elixir ADD (x3) * Guild 25% = x3.75; Paragon x2 buffs DO NOT stack (>1 gives x2 only + warning)
+    local _oUA, _oSD, _oMW, _oGP = _G.UnitAura, _G.serverData, AP.mentorWhere, AP.guildAttuneBonusPct
+    local mockAuras = {
+        { "Дар Субботы", 900206 },
+        { "Эликсир поглощения предметов", 900210 },
+        { "Эликсир двойного опыта", 900211 },
+        { "Благословение новичка", 1040174 },
+    }
+    _G.UnitAura = function(unit, idx, flt)
+        local a = (unit == "player") and mockAuras[idx] or nil
+        if not a then return nil end
+        return a[1], "", "Interface\\Icons\\INV_Misc_QuestionMark", 1, nil, 3600, 0, "player", false, false, a[2]
+    end
+    _G.serverData = { level = 120, experience = 500, expMax = 2000, stats = { [19] = 50 } }
+    AP.mentorWhere = { v2 = true, gift = 1, elixir = 1, guildPct = 25 }
+    AP.guildAttuneBonusPct = 25
+    local eqXP = AP:GetEquippedAttuneProgress()
+    assert(math.abs((eqXP.xpMult or 0) - 3.75) < 0.001, "Attune XP must be (1+1+1)*1.25 = 3.75! got=" .. tostring(eqXP.xpMult))
+    local px = AP:GetParagonXPBreakdown()
+    assert(px.paragonX2Mult == 2 and px.paragonX2Wasted == true, "Multiple x2 Paragon sources must stay x2 and flag overlap!")
+    assert(math.abs((px.paragonMobMult or 0) - 2.5) < 0.001, "Paragon mob mult with x2 + 25% perk must be 2.5! got=" .. tostring(px.paragonMobMult))
+    AP:OpenUI("summary")
+    local sp = AttuneParserFrame and AttuneParserFrame.tabPanels and AttuneParserFrame.tabPanels.summary
+    local c2Txt = sp and sp._c2 and sp._c2.body and sp._c2.body:GetText() or ""
+    assert(c2Txt:find("x3.75", 1, true) and c2Txt:find("Гильдия +25%", 1, true), "Card 2 must show x3.75 (not x3.7) and Гильдия +25%! got=" .. c2Txt)
+    assert(c2Txt:find("x2.5", 1, true) and c2Txt:find("x2 не стак.", 1, true), "Card 2 must show Paragon x2.5 and non-stacking notice! got=" .. c2Txt)
+    assert(c2Txt:find("0 зол.", 1, true) and not c2Txt:find("~0g", 1, true), "Card 2 must use зол. instead of ~0g!")
+    assert(c2Txt:find("все поглощены на 100%", 1, true) and not c2Txt:find("~0 кв.", 1, true), "Card 2 must show completed status when eq.count==0!")
+    sp._c2._xpHelpBtn._scripts.OnEnter(sp._c2._xpHelpBtn)
+    _G.UnitAura, _G.serverData, AP.mentorWhere, AP.guildAttuneBonusPct, _G.UnitLevel = _oUA, _oSD, _oMW, _oGP, _oUL
 
     return "REAL_AP_CORE_PASSED"
     ''')

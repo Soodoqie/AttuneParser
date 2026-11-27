@@ -480,6 +480,243 @@ local function CreateLocationDropdown(parentBox, anchorBtn, onSelectFn)
 end
 
 -- Вкладка 1: Топ инстов / Без ур. (1-lvl)
+local function FormatShortStat(v)
+    v = math.floor(tonumber(v) or 0)
+    if v >= 100000 then
+        return tostring(math.floor(v / 1000 + 0.5)) .. "к"
+    elseif v >= 1000 then
+        local s = string.format("%.1f", v / 1000):gsub("%.0$", "")
+        return s .. "к"
+    end
+    return tostring(v)
+end
+
+local DIFF_NAMES_4 = { [1] = "10 об", [2] = "25 об", [3] = "10 гер", [4] = "25 гер" }
+local DIFF_NAMES_2R = { [1] = "10 об", [2] = "25 об" }
+local DIFF_NAMES_2D = { [1] = "Обыч.", [2] = "Героич." }
+
+local function FormatTopDiffLabel(diffF, kindF)
+    if not diffF or diffF <= 0 then return "Все" end
+    if kindF == "Dungeon" then
+        return DIFF_NAMES_2D[diffF] or DIFF_NAMES_4[diffF] or "Все"
+    end
+    return DIFF_NAMES_4[diffF] or "Все"
+end
+
+local function FormatZoneSubline(z, diffF)
+    local kindTxt = z.isRaid and "|cffff8000Рейд|r" or "|cff38bdf8Данж|r"
+    local eraTxt = (z.exp == 3 and "WotLK") or (z.exp == 2 and "TBC") or (z.exp == 1 and "Classic") or ""
+    local prefix = (eraTxt ~= "") and (kindTxt .. " |cff94a3b8(" .. eraTxt .. ")|r") or kindTxt
+    if diffF and diffF > 0 then
+        local maxD = z.maxDiffs or 4
+        local dLbl = (maxD == 4 and DIFF_NAMES_4[diffF]) or (z.isRaid and DIFF_NAMES_2R[diffF]) or DIFF_NAMES_2D[diffF] or DIFF_NAMES_4[diffF] or "?"
+        return prefix .. " |cff94a3b8- " .. dLbl .. "|r"
+    end
+    if z.isSingleDiff or not z.byDiff then
+        return prefix .. " |cff64748b- 1 сложность|r"
+    end
+    local maxD = z.maxDiffs or 4
+    local parts = {}
+    for d = 1, maxD do
+        local bd = z.byDiff[d]
+        local rem = bd and ((bd.newCount or 0) + (bd.forgeCount or 0)) or 0
+        if rem > 0 then
+            local lbl = (maxD == 4 and DIFF_NAMES_4[d]) or (z.isRaid and DIFF_NAMES_2R[d]) or DIFF_NAMES_2D[d] or tostring(d)
+            local col = (d >= 3 or (maxD == 2 and not z.isRaid and d == 2)) and "|cffffd200" or "|cff94a3b8"
+            table.insert(parts, col .. lbl .. ":" .. rem .. "|r")
+        end
+    end
+    if #parts == 0 then return prefix end
+    return prefix .. " | " .. table.concat(parts, " ")
+end
+
+local function UpdateRowProgressBar(r, done, total)
+    done = tonumber(done) or 0
+    total = tonumber(total) or 0
+    if total <= 0 then
+        r.progBg:Hide()
+        return
+    end
+    r.progBg:Show()
+    local pct = math.min(100, math.max(0, math.floor((done / total) * 100 + 0.5)))
+    if pct <= 0 then
+        r.progFill:Hide()
+    else
+        r.progFill:Show()
+        r.progFill:SetWidth(math.max(2, math.floor(170 * pct / 100 + 0.5)))
+        if pct >= 75 then
+            r.progFill:SetVertexColor(0.20, 0.78, 0.35, 0.85)
+        elseif pct >= 35 then
+            r.progFill:SetVertexColor(0.16, 0.66, 0.88, 0.85)
+        else
+            r.progFill:SetVertexColor(0.86, 0.58, 0.16, 0.85)
+        end
+    end
+    r.progTxt:SetText(string.format("%d%% (%d/%d)", pct, done, total))
+end
+
+local function CreateTopRow(sf, i)
+    local r = CreateFrame("Button", nil, sf)
+    r:SetHeight(35)
+    r:SetPoint("TOPLEFT", sf, "TOPLEFT", 0, -(i - 1) * 38)
+    r:SetPoint("TOPRIGHT", sf, "TOPRIGHT", -16, -(i - 1) * 38)
+    r:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+    PS.StyleScrollRow(r, (i % 2) == 1)
+
+    r.idxTxt = r:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    r.idxTxt:SetPoint("LEFT", r, "LEFT", 6, 0)
+    r.idxTxt:SetSize(24, 16)
+    r.idxTxt:SetJustifyH("LEFT")
+    if r.idxTxt.SetWordWrap then r.idxTxt:SetWordWrap(false) end
+
+    r.icBox = CreateFrame("Frame", nil, r)
+    r.icBox:SetSize(28, 28)
+    r.icBox:SetPoint("LEFT", r.idxTxt, "RIGHT", 4, 0)
+    PS.StyleBox(r.icBox, 0.75, false)
+    r.ic = r.icBox:CreateTexture(nil, "ARTWORK")
+    r.ic:SetPoint("TOPLEFT", 2, -2)
+    r.ic:SetPoint("BOTTOMRIGHT", -2, 2)
+    r.ic:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+
+    r.nameTxt = r:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    r.nameTxt:SetPoint("TOPLEFT", r.icBox, "TOPRIGHT", 8, -1)
+    r.nameTxt:SetSize(296, 15)
+    r.nameTxt:SetJustifyH("LEFT")
+    if r.nameTxt.SetWordWrap then r.nameTxt:SetWordWrap(false) end
+
+    r.subTxt = r:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    r.subTxt:SetPoint("BOTTOMLEFT", r.icBox, "BOTTOMRIGHT", 8, 0)
+    r.subTxt:SetSize(296, 13)
+    r.subTxt:SetJustifyH("LEFT")
+    if r.subTxt.SetWordWrap then r.subTxt:SetWordWrap(false) end
+
+    r.cntTxt = r:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    r.cntTxt:SetPoint("TOPLEFT", r.nameTxt, "TOPRIGHT", 8, 0)
+    r.cntTxt:SetSize(174, 14)
+    r.cntTxt:SetJustifyH("LEFT")
+    if r.cntTxt.SetWordWrap then r.cntTxt:SetWordWrap(false) end
+
+    r.progBg = CreateFrame("Frame", nil, r)
+    r.progBg:SetPoint("TOPLEFT", r.cntTxt, "BOTTOMLEFT", 0, -2)
+    r.progBg:SetSize(172, 12)
+    PS.StyleBox(r.progBg, 0.78, false)
+
+    r.progFill = r.progBg:CreateTexture(nil, "ARTWORK")
+    r.progFill:SetPoint("TOPLEFT", r.progBg, "TOPLEFT", 1, -1)
+    r.progFill:SetPoint("BOTTOMLEFT", r.progBg, "BOTTOMLEFT", 1, 1)
+    r.progFill:SetTexture("Interface\\TargetingFrame\\UI-StatusBar")
+    r.progFill:SetWidth(1)
+
+    r.progTxt = r.progBg:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    r.progTxt:SetAllPoints(r.progBg)
+    r.progTxt:SetJustifyH("CENTER")
+    r.progTxt:SetJustifyV("MIDDLE")
+
+    r.tpBtn = PS.MakeBtn(r, 34, 22, "ТП", "green")
+    r.tpBtn:SetPoint("RIGHT", r, "RIGHT", -5, 0)
+
+    r.ejBtn = PS.MakeBtn(r, 46, 22, "Гид", "dark")
+    r.ejBtn:SetPoint("RIGHT", r.tpBtn, "LEFT", -4, 0)
+
+    r.statTxt = r:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    r.statTxt:SetPoint("RIGHT", r.ejBtn, "LEFT", -8, 0)
+    r.statTxt:SetSize(76, 16)
+    r.statTxt:SetJustifyH("RIGHT")
+    if r.statTxt.SetWordWrap then r.statTxt:SetWordWrap(false) end
+
+    return r
+end
+
+local function RenderTopRow(r, rankIdx, d, topMode, diffF, talActive)
+    if not d then
+        r._rowData = nil
+        r:Hide()
+        return
+    end
+    r._rowData = d
+    r:Show()
+    r.idxTxt:SetText(string.format("|cffb0a080#%d|r", rankIdx))
+    if d.kind == "zone" then
+        local z = d.zone
+        if r.ic then
+            local icPath = (type(AP.GetZoneIcon) == "function") and AP:GetZoneIcon(z.zoneId, z.isRaid, true) or "Interface\\Icons\\INV_Misc_Map_01"
+            r.ic:SetTexture(icPath)
+        end
+        if z.isLocked then
+            r.icBox:SetBackdropBorderColor(0.95, 0.25, 0.25, 0.85)
+        elseif z.isRaid then
+            r.icBox:SetBackdropBorderColor(1.0, 0.55, 0.15, 0.70)
+        else
+            r.icBox:SetBackdropBorderColor(0.22, 0.74, 0.97, 0.70)
+        end
+
+        local nameCol = z.isRaid and "|cffff9030" or "|cff60c8fa"
+        local cdTag = z.isLocked and " |cffff5050[КД]|r" or ""
+        local ownTag = (d.ownedCount and d.ownedCount > 0) and (" |cff40ff40[Есть: " .. d.ownedCount .. "]|r") or ""
+        r.nameTxt:SetText(nameCol .. (z.zoneName or "?") .. "|r" .. cdTag .. ownTag)
+        r.subTxt:SetText(FormatZoneSubline(z, diffF))
+
+        if topMode == "forge" or topMode == "wednesday" then
+            local fb = z.forgeByTier or {}
+            local tParts = {}
+            if (fb[0] or 0) > 0 then table.insert(tParts, "|cffa335eeОб:" .. fb[0] .. "|r") end
+            if (fb[1] or 0) > 0 then table.insert(tParts, "|cffff8000Эп:" .. fb[1] .. "|r") end
+            if (fb[2] or 0) > 0 then table.insert(tParts, "|cff38bdf8Лг:" .. fb[2] .. "|r") end
+            local tStr = (#tParts > 0) and (" | " .. table.concat(tParts, " ")) or ""
+            r.cntTxt:SetText(string.format("|cffffd200Ковка: %d|r%s", z.forgeCount or 0, tStr))
+            r.statTxt:SetText("|cffffd200+" .. FormatShortStat(z.forgeRemainStats or 0) .. "|r")
+        else
+            local nrNote = ((z.noReqCount or 0) > 0) and (" |cff94a3b8| 1у:" .. z.noReqCount .. "|r") or ""
+            r.cntTxt:SetText(string.format("|cff40ff40Нов: %d|r |cffffd200Ков: %d|r%s",
+                z.newCount or 0, z.forgeCount or 0, nrNote))
+            r.statTxt:SetText("|cff40ff40+" .. FormatShortStat(z.newMaxStats or 0) .. "|r")
+        end
+        UpdateRowProgressBar(r, z.completedCount, z.totalPool)
+
+        r.ejBtn:Show()
+        if talActive then
+            r.tpBtn:Show()
+            r.ejBtn:ClearAllPoints()
+            r.ejBtn:SetPoint("RIGHT", r.tpBtn, "LEFT", -4, 0)
+        else
+            r.tpBtn:Hide()
+            r.ejBtn:ClearAllPoints()
+            r.ejBtn:SetPoint("RIGHT", r, "RIGHT", -5, 0)
+        end
+        r.statTxt:ClearAllPoints()
+        r.statTxt:SetPoint("RIGHT", r.ejBtn, "LEFT", -8, 0)
+    elseif d.kind == "noreq" then
+        local it = d.item
+        local tz = it.resolvedZone or it.primaryZone
+        if r.ic then
+            local iTex = (type(GetItemIcon) == "function" and it.itemId and GetItemIcon(it.itemId)) or select(10, GetItemInfo(it.link or it.itemId))
+            r.ic:SetTexture(iTex or "Interface\\Icons\\INV_Misc_QuestionMark")
+        end
+        r.icBox:SetBackdropBorderColor(0.25, 0.85, 0.45, 0.70)
+        local stateTag = it.isNew and "|cff40ff40[Нов]|r " or ("|cffffd200[" .. (it.curPct or 0) .. "%]|r ")
+        local dTag = (it.isInstanceZone and AP.GetItemDiffTag and tz) and AP:GetItemDiffTag(it.itemId, tz, it.diffMask, false) or ""
+        local dStr = (dTag ~= "") and ("|cff94a3b8[" .. dTag .. "]|r ") or ""
+        r.nameTxt:SetText(stateTag .. dStr .. ShortItemLink(it.itemId, it.name, it.quality))
+        r.subTxt:SetText(string.format("|cff94a3b8%s|r | ilvl %d | ур. %d",
+            tostring(it.zoneName or "Мир / Квест"), it.ilvl or 0, it.reqLvl or 0))
+        r.cntTxt:SetText(it.isNew and "|cff40ff40Не поглощен|r" or string.format("|cffffd200Поглощено %d%% -> 90%%|r", it.curPct or 0))
+        UpdateRowProgressBar(r, it.curPct or 0, 90)
+        r.statTxt:SetText("|cff40ff40+" .. FormatShortStat(it.totalRemainStats or 0) .. "|r")
+        r.tpBtn:Hide()
+        if it.isInstanceZone and tz and tz > 0 then
+            r.ejBtn:Show()
+            r.ejBtn:ClearAllPoints()
+            r.ejBtn:SetPoint("RIGHT", r, "RIGHT", -5, 0)
+            r.statTxt:ClearAllPoints()
+            r.statTxt:SetPoint("RIGHT", r.ejBtn, "LEFT", -8, 0)
+        else
+            r.ejBtn:Hide()
+            r.statTxt:ClearAllPoints()
+            r.statTxt:SetPoint("RIGHT", r, "RIGHT", -8, 0)
+        end
+    end
+end
+
 local function BuildTopTab(parent)
     local box = CreateFrame("Frame", nil, parent)
     box:SetAllPoints(parent)
@@ -494,23 +731,22 @@ local function BuildTopTab(parent)
     local filterBar = CreateFrame("Frame", nil, box)
     filterBar:SetPoint("TOPLEFT", box, "TOPLEFT", 0, 0)
     filterBar:SetPoint("TOPRIGHT", box, "TOPRIGHT", 0, 0)
-    filterBar:SetHeight(84)
+    filterBar:SetHeight(58)
     PS.StyleBox(filterBar, 0.50, false)
 
-    -- Строка фильтров 1: Режимы + Обхват + Синхр.
+    -- Строка 1: Режимы + Обхват + Обновить + Сброс
     local modeDefs = {
-        { key = "new", label = "Новые" },
-        { key = "forge", label = "Ковка 90%" },
-        { key = "wednesday", label = "Дар Среды: Ковка" },
-        { key = "noreq", label = "1-lvl (Без ур.)" },
+        { key = "new", label = "Новые", w = 82 },
+        { key = "forge", label = "Ковка -> 90%", w = 104 },
+        { key = "wednesday", label = "Дар среды", w = 96 },
+        { key = "noreq", label = "Без ур. (1)", w = 94 },
     }
     local modeBtns = {}
     local mx = 8
     for _, md in ipairs(modeDefs) do
-        local w = (md.key == "wednesday") and 130 or ((md.key == "noreq") and 110 or 86)
-        local b = PS.MakeBtn(filterBar, w, 22, md.label, "dark")
+        local b = PS.MakeBtn(filterBar, md.w, 22, md.label, "dark")
         b:SetPoint("TOPLEFT", filterBar, "TOPLEFT", mx, -6)
-        mx = mx + w + 5
+        mx = mx + md.w + 6
         b:SetScript("OnClick", function()
             AP:SetSetting("topMode", md.key)
             box.RefreshData()
@@ -518,26 +754,36 @@ local function BuildTopTab(parent)
         modeBtns[md.key] = b
     end
 
-    local scopeBtn = PS.MakeBtn(filterBar, 108, 22, "Персонаж", "dark")
-    scopeBtn:SetPoint("TOPRIGHT", filterBar, "TOPRIGHT", -88, -6)
-    scopeBtn:SetScript("OnClick", function()
-        local cur = AP:GetSetting("scope")
-        AP:SetSetting("scope", (cur == "account") and "hero" or "account")
-        box.RefreshData()
-    end)
+    local resetBtn = PS.MakeBtn(filterBar, 64, 22, "Сброс", "dark")
+    resetBtn:SetPoint("TOPRIGHT", filterBar, "TOPRIGHT", -6, -6)
 
     local syncBtn = PS.MakeBtn(filterBar, 82, 22, "Обновить", "green")
-    syncBtn:SetPoint("TOPRIGHT", filterBar, "TOPRIGHT", -6, -6)
+    syncBtn:SetPoint("RIGHT", resetBtn, "LEFT", -5, 0)
     syncBtn:SetScript("OnClick", function()
         AP:RequestServerSync(true)
         if type(RequestRaidInfo) == "function" then pcall(RequestRaidInfo) end
         AP.After(0.5, function() box.RefreshData() end, "ap_ui_sync")
     end)
 
-    -- Строка фильтров 2: Тип + Эра + Без КД + Без тяж.кв + Сорт
-    local kindBtn = PS.MakeBtn(filterBar, 96, 20, "Тип: Все", "dark")
+    local scopeBtn = PS.MakeBtn(filterBar, 96, 22, "Персонаж", "dark")
+    scopeBtn:SetPoint("RIGHT", syncBtn, "LEFT", -5, 0)
+    scopeBtn:SetScript("OnClick", function()
+        local cur = AP:GetSetting("scope")
+        AP:SetSetting("scope", (cur == "account") and "hero" or "account")
+        box.RefreshData()
+    end)
+
+    -- Строка 2: Категория + Эра + Сложность/Локация + КД + Квесты + Сорт + Поиск
+    local kindBtn = PS.MakeBtn(filterBar, 92, 20, "Тип: Все", "dark")
+    box._kindBtn = kindBtn
     kindBtn:SetPoint("TOPLEFT", filterBar, "TOPLEFT", 8, -32)
-    kindBtn:SetScript("OnClick", function()
+    kindBtn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+    kindBtn:SetScript("OnClick", function(_, mBtn)
+        if mBtn == "RightButton" then
+            AP:SetSetting("kindFilter", "All")
+            box.RefreshData()
+            return
+        end
         local c = AP:GetSetting("kindFilter")
         local tm = AP:GetSetting("topMode")
         local nxt
@@ -547,47 +793,50 @@ local function BuildTopTab(parent)
             nxt = (c == "All" and "Raid") or (c == "Raid" and "Dungeon") or "All"
         end
         AP:SetSetting("kindFilter", nxt)
+        if nxt == "Dungeon" and (tonumber(AP:GetSetting("diffFilter")) or 0) > 2 then
+            AP:SetSetting("diffFilter", 0)
+        end
         box.RefreshData()
     end)
 
-    local eraBtn = PS.MakeBtn(filterBar, 96, 20, "Эра: Все", "dark")
-    eraBtn:SetPoint("LEFT", kindBtn, "RIGHT", 6, 0)
-    eraBtn:SetScript("OnClick", function()
+    local eraBtn = PS.MakeBtn(filterBar, 88, 20, "Эра: Все", "dark")
+    eraBtn:SetPoint("LEFT", kindBtn, "RIGHT", 4, 0)
+    eraBtn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+    eraBtn:SetScript("OnClick", function(_, mBtn)
+        if mBtn == "RightButton" then
+            AP:SetSetting("eraFilter", "All")
+            box.RefreshData()
+            return
+        end
         local c = AP:GetSetting("eraFilter")
         local nxt = (c == "All" and "WotLK") or (c == "WotLK" and "TBC") or (c == "TBC" and "Classic") or "All"
         AP:SetSetting("eraFilter", nxt)
         box.RefreshData()
     end)
 
-    local cdBtn = PS.MakeBtn(filterBar, 82, 20, "Без КД", "dark")
-    cdBtn:SetPoint("LEFT", eraBtn, "RIGHT", 6, 0)
-    cdBtn:SetScript("OnClick", function()
-        AP:SetSetting("onlyUnlocked", not AP:GetSetting("onlyUnlocked"))
+    local diffBtn = PS.MakeBtn(filterBar, 110, 20, "Слож.: Все", "dark")
+    box._diffBtn = diffBtn
+    diffBtn:SetPoint("LEFT", eraBtn, "RIGHT", 4, 0)
+    diffBtn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+    diffBtn:SetScript("OnClick", function(_, mBtn)
+        if mBtn == "RightButton" then
+            AP:SetSetting("diffFilter", 0)
+            box.RefreshData()
+            return
+        end
+        local cur = tonumber(AP:GetSetting("diffFilter")) or 0
+        local maxCycle = (AP:GetSetting("kindFilter") == "Dungeon") and 2 or 4
+        local nxt = (cur >= maxCycle) and 0 or (cur + 1)
+        AP:SetSetting("diffFilter", nxt)
         box.RefreshData()
     end)
 
-    local hqBtn = PS.MakeBtn(filterBar, 110, 20, "Без тяж.кв", "dark")
-    hqBtn:SetPoint("LEFT", cdBtn, "RIGHT", 6, 0)
-    hqBtn:SetScript("OnClick", function()
-        AP:SetSetting("excludeHeavyQuests", not AP:GetSetting("excludeHeavyQuests"))
-        box.RefreshData()
-    end)
-
-    local sortBtn = PS.MakeBtn(filterBar, 128, 20, "Сорт: Рейтинг", "dark")
-    sortBtn:SetPoint("LEFT", hqBtn, "RIGHT", 6, 0)
-    sortBtn:SetScript("OnClick", function()
-        local c = AP:GetSetting("sortBy")
-        local nxt = (c == "default" and "count") or (c == "count" and "stats") or "default"
-        AP:SetSetting("sortBy", nxt)
-        box.RefreshData()
-    end)
-
-    -- Строка фильтров 3: Локация (выпадающий список) + Поиск + Сброс фильтров
-    local locBtn = PS.MakeBtn(filterBar, 240, 20, "Локация: Все", "dark")
-    locBtn:SetPoint("TOPLEFT", filterBar, "TOPLEFT", 8, -58)
-    locBtn.label:SetWidth(226)
+    local locBtn = PS.MakeBtn(filterBar, 110, 20, "Локация: Все", "dark")
+    locBtn:SetPoint("LEFT", eraBtn, "RIGHT", 4, 0)
+    locBtn.label:SetWidth(98)
     if locBtn.label.SetWordWrap then locBtn.label:SetWordWrap(false) end
     locBtn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+    locBtn:Hide()
 
     local locMenu = CreateLocationDropdown(box, locBtn, function(ent)
         box.locMode = ent.mode or "ALL"
@@ -606,10 +855,7 @@ local function BuildTopTab(parent)
             box.RefreshData()
             return
         end
-        if locMenu:IsShown() then
-            locMenu:Hide()
-            return
-        end
+        if locMenu:IsShown() then locMenu:Hide(); return end
         local items = {
             { label = "|cffffffffВсе локации|r", shortLabel = "Все", mode = "ALL" },
             { label = "|cff38bdf8Только инсты (Рейды и Данжи)|r", shortLabel = "Только инсты", mode = "INST" },
@@ -627,9 +873,40 @@ local function BuildTopTab(parent)
         locMenu:OpenEntries(items)
     end)
 
+    local cdBtn = PS.MakeBtn(filterBar, 64, 20, "Без КД", "dark")
+    cdBtn:SetPoint("LEFT", diffBtn, "RIGHT", 4, 0)
+    cdBtn:SetScript("OnClick", function()
+        AP:SetSetting("onlyUnlocked", not AP:GetSetting("onlyUnlocked"))
+        box.RefreshData()
+    end)
+
+    local hqBtn = PS.MakeBtn(filterBar, 68, 20, "Без кв.", "dark")
+    hqBtn:SetPoint("LEFT", cdBtn, "RIGHT", 4, 0)
+    hqBtn:SetScript("OnClick", function()
+        AP:SetSetting("excludeHeavyQuests", not AP:GetSetting("excludeHeavyQuests"))
+        box.RefreshData()
+    end)
+    hqBtn:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
+        GameTooltip:SetText("|cffffd200Фильтр редких квестов|r")
+        GameTooltip:AddLine("Скрывает предметы с долгими или сложными цепочками заданий при подсчете инстов.", 0.9, 0.9, 0.9, true)
+        GameTooltip:Show()
+    end)
+    hqBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+
+    local sortBtn = PS.MakeBtn(filterBar, 102, 20, "Сорт: Рейтинг", "dark")
+    sortBtn:SetPoint("LEFT", hqBtn, "RIGHT", 4, 0)
+    sortBtn:SetScript("OnClick", function()
+        local c = AP:GetSetting("sortBy")
+        local nxt = (c == "default" and "count") or (c == "count" and "stats") or "default"
+        AP:SetSetting("sortBy", nxt)
+        box.RefreshData()
+    end)
+
     local searchWrap = CreateFrame("Frame", nil, filterBar)
-    searchWrap:SetPoint("LEFT", locBtn, "RIGHT", 6, 0)
-    searchWrap:SetSize(226, 20)
+    searchWrap:SetPoint("LEFT", sortBtn, "RIGHT", 4, 0)
+    searchWrap:SetPoint("RIGHT", filterBar, "RIGHT", -6, 0)
+    searchWrap:SetHeight(20)
     PS.StyleBox(searchWrap, 0.72, false)
 
     local searchEdit = CreateFrame("EditBox", nil, searchWrap)
@@ -641,7 +918,7 @@ local function BuildTopTab(parent)
 
     local searchPh = searchWrap:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
     searchPh:SetPoint("LEFT", searchWrap, "LEFT", 6, 0)
-    searchPh:SetText("Поиск: предмет или локация...")
+    searchPh:SetText("Поиск инста или вещи...")
 
     local searchClr = PS.MakeBtn(searchWrap, 18, 18, "x", "dark")
     searchClr:SetPoint("RIGHT", searchWrap, "RIGHT", -1, 0)
@@ -654,11 +931,9 @@ local function BuildTopTab(parent)
     searchEdit:SetScript("OnTextChanged", function(self)
         local t = (self:GetText() or ""):gsub("^%s+", ""):gsub("%s+$", "")
         if t == "" then
-            searchPh:Show()
-            searchClr:Hide()
+            searchPh:Show(); searchClr:Hide()
         else
-            searchPh:Hide()
-            searchClr:Show()
+            searchPh:Hide(); searchClr:Show()
         end
         if box.searchQuery ~= t then
             box.searchQuery = t
@@ -668,11 +943,10 @@ local function BuildTopTab(parent)
     searchEdit:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
     searchEdit:SetScript("OnEnterPressed", function(self) self:ClearFocus() end)
 
-    local resetBtn = PS.MakeBtn(filterBar, 134, 20, "Сбросить фильтры", "dark")
-    resetBtn:SetPoint("TOPRIGHT", filterBar, "TOPRIGHT", -6, -58)
     resetBtn:SetScript("OnClick", function()
         AP:SetSetting("kindFilter", "All")
         AP:SetSetting("eraFilter", "All")
+        AP:SetSetting("diffFilter", 0)
         AP:SetSetting("onlyUnlocked", false)
         box.locMode = "ALL"
         box.locZoneId = nil
@@ -685,54 +959,22 @@ local function BuildTopTab(parent)
 
     local listBox = CreateFrame("Frame", nil, box)
     listBox:SetPoint("TOPLEFT", filterBar, "BOTTOMLEFT", 0, -6)
-    listBox:SetPoint("BOTTOMRIGHT", box, "BOTTOMRIGHT", 0, 22)
+    listBox:SetPoint("BOTTOMRIGHT", box, "BOTTOMRIGHT", 0, 20)
     PS.StyleBox(listBox, 0.36, false)
 
     local statusFoot = box:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    statusFoot:SetPoint("BOTTOMLEFT", box, "BOTTOMLEFT", 4, 4)
-    statusFoot:SetPoint("BOTTOMRIGHT", box, "BOTTOMRIGHT", -4, 4)
+    statusFoot:SetPoint("BOTTOMLEFT", box, "BOTTOMLEFT", 4, 3)
+    statusFoot:SetPoint("BOTTOMRIGHT", box, "BOTTOMRIGHT", -4, 3)
     statusFoot:SetJustifyH("LEFT")
 
-    local VIS = 11
-    local ROW_H = 30
+    local VIS = 10
+    local ROW_H = 38
     local sf = PS.AttachScroll(listBox, VIS * ROW_H, ROW_H, VIS, function() box.RenderRows() end)
     sf:SetPoint("TOPLEFT", listBox, "TOPLEFT", 4, -4)
     sf:SetPoint("BOTTOMRIGHT", listBox, "BOTTOMRIGHT", -4, 4)
 
     for i = 1, VIS do
-        local r = CreateFrame("Button", nil, sf)
-        r:SetHeight(ROW_H - 2)
-        r:SetPoint("TOPLEFT", sf, "TOPLEFT", 0, -(i - 1) * ROW_H)
-        r:SetPoint("TOPRIGHT", sf, "TOPRIGHT", -16, -(i - 1) * ROW_H)
-        r:RegisterForClicks("LeftButtonUp", "RightButtonUp")
-        PS.StyleScrollRow(r, (i % 2) == 1)
-
-        r.idxTxt = r:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-        r.idxTxt:SetPoint("LEFT", r, "LEFT", 6, 0)
-        r.idxTxt:SetSize(26, 16)
-        r.idxTxt:SetJustifyH("LEFT")
-        if r.idxTxt.SetWordWrap then r.idxTxt:SetWordWrap(false) end
-
-        r.nameTxt = r:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-        r.nameTxt:SetPoint("LEFT", r.idxTxt, "RIGHT", 4, 0)
-        r.nameTxt:SetSize(214, 16)
-        r.nameTxt:SetJustifyH("LEFT")
-        if r.nameTxt.SetWordWrap then r.nameTxt:SetWordWrap(false) end
-
-        r.cntTxt = r:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-        r.cntTxt:SetPoint("LEFT", r.nameTxt, "RIGHT", 4, 0)
-        r.cntTxt:SetSize(108, 16)
-        r.cntTxt:SetJustifyH("LEFT")
-        if r.cntTxt.SetWordWrap then r.cntTxt:SetWordWrap(false) end
-
-        r.statTxt = r:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-        r.statTxt:SetPoint("LEFT", r.cntTxt, "RIGHT", 4, 0)
-        r.statTxt:SetSize(78, 16)
-        r.statTxt:SetJustifyH("RIGHT")
-        if r.statTxt.SetWordWrap then r.statTxt:SetWordWrap(false) end
-
-        r.tpBtn = PS.MakeBtn(r, 30, 20, "ТП", "green")
-        r.tpBtn:SetPoint("RIGHT", r, "RIGHT", -4, 0)
+        local r = CreateTopRow(sf, i)
         r.tpBtn:SetScript("OnClick", function(btn)
             local d = btn:GetParent()._rowData
             if d and d.kind == "zone" then
@@ -740,9 +982,6 @@ local function BuildTopTab(parent)
                 AP:OpenTalorianUI()
             end
         end)
-
-        r.ejBtn = PS.MakeBtn(r, 148, 20, "Открыть в Путеводителе", "dark")
-        r.ejBtn:SetPoint("RIGHT", r.tpBtn, "LEFT", -4, 0)
         r.ejBtn:SetScript("OnClick", function(btn)
             local d = btn:GetParent()._rowData
             if not d then return end
@@ -755,6 +994,12 @@ local function BuildTopTab(parent)
                 end
             end
         end)
+        r.ejBtn:SetScript("OnEnter", function(self)
+            GameTooltip:SetOwner(self, "ANCHOR_TOP")
+            GameTooltip:SetText("Открыть в Путеводителе")
+            GameTooltip:Show()
+        end)
+        r.ejBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
         r:SetScript("OnClick", function(self, mouseBtn)
             local d = self._rowData
@@ -786,9 +1031,10 @@ local function BuildTopTab(parent)
                 local z = d.zone
                 local zCol = z.isRaid and "|cffff8000" or "|cff38bdf8"
                 GameTooltip:SetText(zCol .. (z.zoneName or "?") .. "|r")
-                GameTooltip:AddLine(string.format("%s | id:%s | %s",
+                local pct = (z.totalPool and z.totalPool > 0) and math.floor(((z.completedCount or 0) / z.totalPool) * 100 + 0.5) or 0
+                GameTooltip:AddLine(string.format("%s | Прогресс: %d%% (%d/%d) | %s",
                     z.isRaid and "Рейд" or "Подземелье",
-                    tostring(z.zoneId or "?"),
+                    pct, z.completedCount or 0, z.totalPool or 0,
                     z.isLocked and "|cffff5050Есть КД|r" or "|cff40ff40Свободно (без КД)|r"
                 ), 0.9, 0.9, 0.9)
                 GameTooltip:AddLine(" ")
@@ -804,9 +1050,6 @@ local function BuildTopTab(parent)
                 if z.byDiff and type(z.byDiff) == "table" then
                     local hasDiff = false
                     local maxD = z.maxDiffs or 4
-                    local dNames4 = { [1] = "10 об", [2] = "25 об", [3] = "10 гер", [4] = "25 гер" }
-                    local dNames2R = { [1] = "10 об", [2] = "25 об" }
-                    local dNames2D = { [1] = "Обычная", [2] = "Героическая" }
                     for dId, df in pairs(z.byDiff) do
                         if (df.newCount or 0) + (df.forgeCount or 0) > 0 then
                             if not hasDiff then
@@ -814,7 +1057,7 @@ local function BuildTopTab(parent)
                                 GameTooltip:AddLine("|cffffd200По сложностям:|r", 1, 1, 1)
                                 hasDiff = true
                             end
-                            local dLbl = (maxD == 4 and dNames4[dId]) or (z.isRaid and dNames2R[dId]) or dNames2D[dId] or ("Сложность " .. tostring(dId))
+                            local dLbl = (maxD == 4 and DIFF_NAMES_4[dId]) or (z.isRaid and DIFF_NAMES_2R[dId]) or DIFF_NAMES_2D[dId] or ("Слож. " .. tostring(dId))
                             GameTooltip:AddLine(string.format("  %s: нов=%d, ковка=%d, +стат=%d",
                                 dLbl, df.newCount or 0, df.forgeCount or 0, df.remainStats or 0), 0.85, 0.85, 0.85)
                         end
@@ -829,7 +1072,7 @@ local function BuildTopTab(parent)
                     end
                 end
                 GameTooltip:AddLine(" ")
-                local hint = "|cff94a3b8ЛКМ: Открыть в Путеводителе"
+                local hint = "|cff94a3b8ЛКМ / Гид: Путеводитель"
                 if AP:IsTalorianBridgeActive() then
                     hint = hint .. " | ПКМ / ТП: Выбрать в Талориане"
                 end
@@ -839,13 +1082,8 @@ local function BuildTopTab(parent)
                 local tz = it.resolvedZone or it.primaryZone
                 local isInst = it.isInstanceZone == true
                 AP:BuildItemTooltip(GameTooltip, it.itemId, {
-                    sfx = it.sfx,
-                    link = it.link,
-                    name = it.name,
-                    quality = it.quality,
-                    zoneId = tz,
-                    diffMask = it.diffMask,
-                    maxSources = 6,
+                    sfx = it.sfx, link = it.link, name = it.name, quality = it.quality,
+                    zoneId = tz, diffMask = it.diffMask, maxSources = 6,
                     hint = isInst
                         and "|cff94a3b8Shift+ЛКМ: ссылка в чат | Ctrl+ЛКМ: примерить | ЛКМ: Открыть в Путеводителе|r"
                         or "|cff94a3b8Shift+ЛКМ: ссылка в чат | Ctrl+ЛКМ: примерить|r",
@@ -862,70 +1100,9 @@ local function BuildTopTab(parent)
         local off = sf.offset or 0
         local talActive = AP:IsTalorianBridgeActive()
         local topMode = AP:GetSetting("topMode")
+        local diffF = tonumber(AP:GetSetting("diffFilter")) or 0
         for i = 1, VIS do
-            local r = box.rows[i]
-            local d = box.data[off + i]
-            if not d then
-                r._rowData = nil
-                r:Hide()
-            else
-                r._rowData = d
-                r:Show()
-                r.idxTxt:SetText(string.format("|cffb0a080#%d|r", off + i))
-                if d.kind == "zone" then
-                    local z = d.zone
-                    local kindTag = z.isRaid and "|cffff8000[Р]|r " or "|cff38bdf8[П]|r "
-                    local cdTag = z.isLocked and " |cffff5050[КД]|r" or ""
-                    local ownTag = (d.ownedCount and d.ownedCount > 0) and (" |cff40ff40[+" .. d.ownedCount .. "]|r") or ""
-                    r.nameTxt:SetText(kindTag .. (z.zoneName or "?") .. cdTag .. ownTag)
-                    if topMode == "forge" or topMode == "wednesday" then
-                        local fb = z.forgeByTier or {}
-                        r.cntTxt:SetText(string.format("Ков:%d(%d/%d/%d) Н:%d",
-                            z.forgeCount or 0, fb[0] or 0, fb[1] or 0, fb[2] or 0, z.newCount or 0))
-                        r.statTxt:SetText("|cffffd200+" .. (z.forgeRemainStats or 0) .. "|r")
-                    else
-                        r.cntTxt:SetText(string.format("|cff40ff40Н:%d|r |cffffd200К:%d|r |cff94a3b81у:%d|r",
-                            z.newCount or 0, z.forgeCount or 0, z.noReqCount or 0))
-                        r.statTxt:SetText("|cff40ff40+" .. (z.newMaxStats or 0) .. "|r")
-                    end
-                    r.ejBtn:Show()
-                    if talActive then
-                        r.nameTxt:SetWidth(186)
-                        r.cntTxt:SetWidth(104)
-                        r.statTxt:SetWidth(74)
-                        r.tpBtn:Show()
-                        r.ejBtn:ClearAllPoints()
-                        r.ejBtn:SetPoint("RIGHT", r.tpBtn, "LEFT", -4, 0)
-                    else
-                        r.nameTxt:SetWidth(214)
-                        r.cntTxt:SetWidth(108)
-                        r.statTxt:SetWidth(78)
-                        r.tpBtn:Hide()
-                        r.ejBtn:ClearAllPoints()
-                        r.ejBtn:SetPoint("RIGHT", r, "RIGHT", -4, 0)
-                    end
-                elseif d.kind == "noreq" then
-                    local it = d.item
-                    local stateTag = it.isNew and "|cff40ff40[Нов]|r" or ("|cffffd200[" .. (it.curPct or 0) .. "%]|r")
-                    local tz = it.resolvedZone or it.primaryZone
-                    local dTag = (it.isInstanceZone and AP.GetItemDiffTag and tz) and AP:GetItemDiffTag(it.itemId, tz, it.diffMask, false) or ""
-                    local dStr = (dTag ~= "") and ("|cff94a3b8[" .. dTag .. "]|r ") or " "
-                    r.nameTxt:SetText(stateTag .. dStr .. ShortItemLink(it.itemId, it.name, it.quality))
-                    r.cntTxt:SetText(string.format("ilvl %d | ур.%d", it.ilvl or 0, it.reqLvl or 0))
-                    r.statTxt:SetText("|cff40ff40+" .. (it.totalRemainStats or 0) .. " стат|r")
-                    r.nameTxt:SetWidth(214)
-                    r.cntTxt:SetWidth(108)
-                    r.statTxt:SetWidth(78)
-                    r.tpBtn:Hide()
-                    if it.isInstanceZone and tz and tz > 0 then
-                        r.ejBtn:Show()
-                        r.ejBtn:ClearAllPoints()
-                        r.ejBtn:SetPoint("RIGHT", r, "RIGHT", -4, 0)
-                    else
-                        r.ejBtn:Hide()
-                    end
-                end
-            end
+            RenderTopRow(box.rows[i], off + i, box.data[off + i], topMode, diffF, talActive)
         end
     end
 
@@ -934,12 +1111,17 @@ local function BuildTopTab(parent)
         local scope = AP:GetSetting("scope")
         local kindF = AP:GetSetting("kindFilter")
         local eraF = AP:GetSetting("eraFilter")
+        local diffF = tonumber(AP:GetSetting("diffFilter")) or 0
         local onlyUnl = AP:GetSetting("onlyUnlocked") == true
         local exclHeavy = AP:GetSetting("excludeHeavyQuests") ~= false
         local sortBy = AP:GetSetting("sortBy")
 
         if topMode ~= "noreq" and kindF == "World" then
             kindF = "All"
+        end
+        if kindF == "Dungeon" and diffF > 2 then
+            diffF = 0
+            AP:SetSetting("diffFilter", 0)
         end
 
         local gift = AP:GetActiveDailyGift(false)
@@ -963,31 +1145,45 @@ local function BuildTopTab(parent)
 
         local kLabels = { All = "Все", Raid = "Рейды", Dungeon = "Данжи", World = "Мир/Кв" }
         kindBtn.label:SetText("Тип: " .. (kLabels[kindF] or "Все"))
+        PS.PaintBtn(kindBtn, (kindF ~= "All") and "gold" or "dark")
         eraBtn.label:SetText("Эра: " .. (ERA_LABELS[eraF] or "Все"))
+        PS.PaintBtn(eraBtn, (eraF ~= "All") and "gold" or "dark")
         PS.PaintBtn(cdBtn, onlyUnl and "green" or "dark")
         PS.PaintBtn(hqBtn, exclHeavy and "green" or "dark")
         sortBtn.label:SetText("Сорт: " .. (sortBy == "count" and "Кол-во" or (sortBy == "stats" and "Статы" or "Рейтинг")))
-        locBtn.label:SetText("Локация: " .. tostring(box.locLabel or "Все"))
-        PS.PaintBtn(locBtn, (box.locMode ~= "ALL") and "gold" or "dark")
 
-        local rows = {}
+        if topMode == "noreq" then
+            diffBtn:Hide()
+            locBtn:Show()
+            locBtn.label:SetText("Локация: " .. tostring(box.locLabel or "Все"))
+            PS.PaintBtn(locBtn, (box.locMode ~= "ALL") and "gold" or "dark")
+        else
+            locBtn:Hide()
+            if locMenu then locMenu:Hide() end
+            diffBtn:Show()
+            diffBtn.label:SetText("Слож.: " .. FormatTopDiffLabel(diffF, kindF))
+            PS.PaintBtn(diffBtn, (diffF > 0) and "gold" or "dark")
+        end
+
         local lockedMap = AP:GetLockedZonesMap()
-        local isRaidOpt = (kindF == "Raid" and true) or (kindF == "Dungeon" and false) or nil
+        local isRaidOpt = nil
+        if kindF == "Raid" then
+            isRaidOpt = true
+        elseif kindF == "Dungeon" then
+            isRaidOpt = false
+        end
         local expOpt = ERA_EXP[eraF]
         local searchQ = (box.searchQuery and box.searchQuery ~= "") and AP.Norm(box.searchQuery) or nil
+        local rows = {}
         local zoneCounts = {}
 
         if topMode == "noreq" then
             local nr = AP:GetNoReqLevelItems({
-                scope = scope,
-                exp = expOpt,
-                isRaid = isRaidOpt,
+                scope = scope, exp = expOpt, isRaid = isRaidOpt,
                 onlyWorld = (kindF == "World"),
-                lockedZones = lockedMap,
-                unlockedOnly = onlyUnl,
+                lockedZones = lockedMap, unlockedOnly = onlyUnl,
                 excludeHeavyQuests = exclHeavy,
             })
-
             local allItems = {}
             for _, it in ipairs(nr.newItems or {}) do
                 it.totalRemainStats = it.maxStatsGain or math.floor((it.coreStatsSum or 0) * ((it.remainPct or 90) / 100) + 0.5)
@@ -997,7 +1193,6 @@ local function BuildTopTab(parent)
                 it.totalRemainStats = math.floor((it.coreStatsSum or 0) * ((it.remainPct or 0) / 100) + 0.5)
                 table.insert(allItems, it)
             end
-
             for _, it in ipairs(allItems) do
                 local tz = it.resolvedZone or it.primaryZone
                 if tz and tz > 0 and it.zoneName then
@@ -1008,11 +1203,7 @@ local function BuildTopTab(parent)
                     end
                     zRec.count = zRec.count + 1
                 end
-            end
-
-            for _, it in ipairs(allItems) do
                 local pass = true
-                local tz = it.resolvedZone or it.primaryZone
                 if box.locMode == "INST" and not it.isInstanceZone then
                     pass = false
                 elseif box.locMode == "WORLD" and it.isInstanceZone then
@@ -1031,7 +1222,6 @@ local function BuildTopTab(parent)
                     table.insert(rows, { kind = "noreq", item = it })
                 end
             end
-
             if sortBy == "count" then
                 table.sort(rows, function(a, b)
                     if (a.item.ilvl or 0) ~= (b.item.ilvl or 0) then return (a.item.ilvl or 0) > (b.item.ilvl or 0) end
@@ -1052,15 +1242,11 @@ local function BuildTopTab(parent)
                 #rows, #allItems, nr.completedCount or 0, fltNote))
         else
             local list = AP:GetRecommendations({
-                mode = topMode,
-                scope = scope,
-                onlyInstances = true,
-                isRaid = isRaidOpt,
-                exp = expOpt,
-                lockedZones = lockedMap,
-                unlockedOnly = onlyUnl,
-                excludeHeavyQuests = exclHeavy,
-                limit = 80,
+                mode = topMode, scope = scope, onlyInstances = true,
+                isRaid = isRaidOpt, exp = expOpt,
+                diffId = (diffF > 0) and diffF or nil,
+                lockedZones = lockedMap, unlockedOnly = onlyUnl,
+                excludeHeavyQuests = exclHeavy, limit = 80,
             })
             if sortBy == "count" then
                 table.sort(list, function(a, b)
@@ -1088,16 +1274,12 @@ local function BuildTopTab(parent)
             for _, z in ipairs(list) do
                 if z.zoneId and z.zoneName then
                     zoneCounts[z.zoneId] = {
-                        zoneId = z.zoneId,
-                        name = z.zoneName,
-                        isInst = true,
+                        zoneId = z.zoneId, name = z.zoneName, isInst = true,
                         count = (z.newCount or 0) + (z.forgeCount or 0),
                     }
                 end
                 local pass = true
-                if box.locMode == "WORLD" then
-                    pass = false
-                elseif box.locMode == "ZONE" and box.locZoneId and z.zoneId ~= box.locZoneId then
+                if diffF > 0 and z.maxDiffs and diffF > z.maxDiffs then
                     pass = false
                 end
                 if pass and searchQ and searchQ ~= "" then
@@ -1112,8 +1294,9 @@ local function BuildTopTab(parent)
             end
             local lockedCnt = 0
             for _, r in ipairs(rows) do if r.zone.isLocked then lockedCnt = lockedCnt + 1 end end
-            statusFoot:SetText(string.format("|cffb0a080Найдено инстов: %d|r (с КД: %d) | ЛКМ: Путеводитель%s",
-                #rows, lockedCnt, AP:IsTalorianBridgeActive() and ", ТП: Талориан" or ""))
+            local diffNote = (diffF > 0) and (" | Слож.: " .. FormatTopDiffLabel(diffF, kindF)) or ""
+            statusFoot:SetText(string.format("|cffb0a080Найдено инстов: %d|r (с КД: %d)%s | ЛКМ: Путеводитель%s",
+                #rows, lockedCnt, diffNote, AP:IsTalorianBridgeActive() and ", ПКМ/ТП: Талориан" or ""))
         end
 
         local sortedZones = {}
@@ -1156,10 +1339,39 @@ local function BuildSummaryTab(parent)
         return c
     end
 
-    local c1 = MakeCard(0, 0, 326, 200, "Каталог, Вехи и Помощник")
-    local c2 = MakeCard(334, 0, 326, 200, "Бонус дня, Пыль и Опыт")
-    local c3 = MakeCard(0, -208, 326, 180, "Уровень, Специализация и Автоматика")
-    local c4 = MakeCard(334, -208, 326, 180, "Суммарные статы поглощения")
+    local c1 = MakeCard(0, 0, 368, 224, "Каталог, Вехи и Помощник")
+    local c2 = MakeCard(376, 0, 368, 224, "Бонус дня, Опыт и Пыль")
+    local c3 = MakeCard(0, -232, 368, 212, "Уровень, Специализация и Автоматика")
+    local c4 = MakeCard(376, -232, 368, 212, "Суммарные статы поглощения")
+
+    local xpHelpBtn = PS.MakeBtn(c2, 108, 18, "Правила опыта (?)", "dark")
+    xpHelpBtn:SetPoint("TOPRIGHT", c2, "TOPRIGHT", -8, -7)
+    xpHelpBtn:SetScript("OnEnter", function(self)
+        local px = (type(AP.GetParagonXPBreakdown) == "function") and AP:GetParagonXPBreakdown() or {}
+        GameTooltip:SetOwner(self, "ANCHOR_LEFT")
+        GameTooltip:SetText("|cffffd200Как складывается опыт на сервере|r")
+        GameTooltip:AddLine(" ")
+        GameTooltip:AddLine("|cff40ff401. Опыт поглощения предметов:|r", 1, 1, 1)
+        GameTooltip:AddLine("  Формула: (1 + Дар Субботы [+1] + Эликсир поглощения [+1]) x (1 + Гильдия +5/10/25%)", 0.9, 0.9, 0.9, true)
+        GameTooltip:AddLine("  - Дар Субботы и Эликсир поглощения |cffffffffскладываются|r (макс. x3), затем умножаются на гильдию (до |cff40ff40x3.75|r).", 0.85, 0.85, 0.85, true)
+        GameTooltip:AddLine("  - Перк «Опыт Paragon», Эликсир двойного опыта и Дар Воскресенья на поглощение |cffff6060не влияют|r.", 0.85, 0.85, 0.85, true)
+        GameTooltip:AddLine(" ")
+        GameTooltip:AddLine("|cff38bdf82. Опыт Paragon (Доп. уровень):|r", 1, 1, 1)
+        GameTooltip:AddLine("  - Базовые удвоения |cffff6060не суммируются|r (действует одно x2): Эликсир двойного опыта, Дар Воскресенья, Праздник опыта (Сб), Благословение новичка (до 100 ур.).", 0.9, 0.9, 0.9, true)
+        GameTooltip:AddLine("  - За убийство существ перемножаются: (x2 или x1) x (1 + перк «Опыт Paragon» до +25%) x (1 + сложность данжа: 0/5/15/25%) x коэф. карты (напр. Накс x0.5).", 0.85, 0.85, 0.85, true)
+        GameTooltip:AddLine(" ")
+        GameTooltip:AddLine("|cffffd2003. Обычный опыт и гильдия:|r", 1, 1, 1)
+        GameTooltip:AddLine("  - «Гильдейский бонус: Опытность» (+5..25%) ускоряет обычный опыт и удваивается Эликсиром двойного опыта.", 0.85, 0.85, 0.85, true)
+        GameTooltip:AddLine("  - «Единство гильдии» (+5/10%) ускоряет только опыт самой гильдии.", 0.85, 0.85, 0.85, true)
+        if px.paragonX2Wasted then
+            GameTooltip:AddLine(" ")
+            GameTooltip:AddLine("|cffff6060Внимание: активно несколько источников x2 (" .. table.concat(px.paragonX2Sources or {}, " + ") .. ") - лишний бафф не дает x4!|r", 1, 0.4, 0.4, true)
+        end
+        GameTooltip:Show()
+    end)
+    xpHelpBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    c2._xpHelpBtn = xpHelpBtn
+    box._c2 = c2
 
     local claimBtn2 = PS.MakeBtn(c1, 130, 22, "Забрать вехи", "green")
     claimBtn2:SetPoint("BOTTOMLEFT", c1, "BOTTOMLEFT", 10, 6)
@@ -1202,7 +1414,7 @@ local function BuildSummaryTab(parent)
         GameTooltip:SetOwner(self, "ANCHOR_TOP")
         GameTooltip:SetText("|cffffd200Быстрый обмен ресурсов|r")
         GameTooltip:AddLine("ЛКМ: обменять 1 шт. (Пылающая -> Астральная, Мерцающая -> Пылающая или Триумф -> Лед).", 0.9, 0.9, 0.9, true)
-        GameTooltip:AddLine(string.format("Курс пыли: %d:1 и %d:1 | Комиссия: %dg за крафт.", st.rate1 or 3, st.rate2 or 3, math.floor((st.bagumFeeCopper or 1000000) / 10000)), 0.85, 0.85, 0.85)
+        GameTooltip:AddLine(string.format("Курс пыли: %d:1 и %d:1 | Комиссия: %d зол. за крафт.", st.rate1 or 3, st.rate2 or 3, math.floor((st.bagumFeeCopper or 1000000) / 10000)), 0.85, 0.85, 0.85)
         GameTooltip:Show()
     end)
     bagumBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -1273,22 +1485,48 @@ local function BuildSummaryTab(parent)
         local g = AP:GetActiveDailyGift(false)
         local st = AP:GetForgeMaterialStock()
         local eq = AP:GetEquippedAttuneProgress()
+        local px = (type(AP.GetParagonXPBreakdown) == "function") and AP:GetParagonXPBreakdown() or {
+            attuneMult = eq.xpMult or 1,
+            paragonMobMult = 1,
+            paragonX2Active = false,
+            paragonX2Sources = {},
+        }
+        local fmtMult = (type(AP.FormatMult) == "function") and AP.FormatMult or function(m) return tostring(m or 1) end
         local craftFeeG = math.floor((st.bagumTitCostCopper or 0) / 10000)
         local rbNote = st.rbActive and string.format(" (Банк ресурсов: %d/%d)", st.rbUsed or 0, st.rbMax or 0) or ""
-        local expElixStr = (g.hasExpElixir or eq.hasExpElixir) and "|cff40ff40ДА (x2)|r" or "|cff94a3b8нет|r"
         local guildStr = (eq.guildKnown == false) and "?" or string.format("+%d%%", eq.guildPct or 0)
+        local attParts = { "Гильдия " .. guildStr }
+        if g.isSaturday then table.insert(attParts, "Дар Сб x2") end
+        if g.hasElixir then table.insert(attParts, "Эликс. погл. x2") end
+        local parParts = {}
+        if px.paragonX2Active then
+            table.insert(parParts, "|cff40ff40x2:|r " .. tostring(px.paragonX2Source or "бафф"))
+        else
+            table.insert(parParts, "без x2")
+        end
+        if px.paragonPerkPts and px.paragonPerkPts > 0 then
+            table.insert(parParts, string.format("перк +%s%%", fmtMult(px.paragonPerkPct or 0)))
+        end
+        if (px.guildExpPct or 0) > 0 then
+            table.insert(parParts, string.format("оп. ги +%d%%", px.guildExpPct))
+        end
+        if px.paragonX2Wasted then
+            table.insert(parParts, "|cffff6060x2 не стак.|r")
+        end
+        local eqLine = ((eq.count or 0) > 0)
+            and string.format("Надетые (%d шт.): ~%d кв. (мир) / %d (данж)", eq.count or 0, eq.questsToFinishAllNormal or 0, eq.questsToFinishAllDungeon or 0)
+            or "|cff94a3b8Надетые: все поглощены на 100% (текущая ковка)|r"
         c2.body:SetText(string.format(
-            "Бонус дня: %s\n%s\nЭликсир поглощения: %s | Эликсир опыта: %s\nМножитель: |cff40ff40x%.2g|r (Гильдия %s)\nЗапасы пыли (обмен %d:1 / %d:1)%s:\n  Мерцающая: |cffa335ee%d|r -> +%d Пылающей | Пылающая: |cffff8000%d|r -> +%d Астральной\n  Астральная: |cff38bdf8%d|r | Потенциал Титана: |cff40ff40%d|r (~%dg)\nСундуки: %d | Лед: %d (из Триумфа: +%d)\nДо ковки: ~%d кв. (обычных) / %d (данж)",
+            "Бонус дня: %s\n%s\nПоглощение: |cff40ff40x%s|r (%s)\nParagon (мобы): |cff38bdf8x%s|r (%s)\nПыль (%d:1 / %d:1)%s:\n  Мерц: |cffa335ee%d|r (+%d Пыл.) | Пыл: |cffff8000%d|r (+%d Астр.) | Астр: |cff38bdf8%d|r\n  Тит. потенциал: |cff40ff40%d|r (%d зол.) | Сундуки: %d | Лед: %d (+%d)\n%s",
             g.active and ("|cffa855f7" .. (g.name or "Бонус") .. "|r (" .. (g.remText or "?") .. ")") or "|cff94a3b8нет|r",
-            (g.desc and g.desc ~= "") and ("|cffb0a080" .. g.desc .. "|r") or "",
-            g.hasElixir and "|cff40ff40ДА|r" or "|cff94a3b8нет|r",
-            expElixStr,
-            eq.xpMult or 1, guildStr,
+            (g.desc and g.desc ~= "") and ("|cffb0a080" .. g.desc .. "|r") or (g.active and "|cff94a3b8Наведите курсор на бафф дня для описания|r" or "|cff94a3b8Бафф дня пока не активен|r"),
+            fmtMult(eq.xpMult or 1), table.concat(attParts, ", "),
+            fmtMult(px.paragonMobMult or 1), table.concat(parParts, ", "),
             st.rate1 or 3, st.rate2 or 3, rbNote,
             st.dustEpic or 0, st.epicToLeg or 0, st.dustLeg or 0, st.legToTit or 0,
             st.dustTit or 0, st.totalTitPotential or 0, craftFeeG,
             st.titanBoxes or 0, st.frostEmblem or 0, st.frostFromLowerEmblems or 0,
-            eq.questsToFinishAllNormal or 0, eq.questsToFinishAllDungeon or 0
+            eqLine
         ))
         if st.bagumOpen and st.bagumDustEnabled and ((st.legDirectToTit or 0) > 0 or (st.epicToLeg or 0) > 0 or (st.triToFrost or 0) > 0) then
             if (st.legDirectToTit or 0) > 0 then
@@ -1590,25 +1828,25 @@ local function BuildBagsTab(parent)
 
         r.locTxt = r:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
         r.locTxt:SetPoint("LEFT", r, "LEFT", 6, 0)
-        r.locTxt:SetSize(84, 16)
+        r.locTxt:SetSize(88, 16)
         r.locTxt:SetJustifyH("LEFT")
         if r.locTxt.SetWordWrap then r.locTxt:SetWordWrap(false) end
 
         r.nameTxt = r:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
         r.nameTxt:SetPoint("LEFT", r.locTxt, "RIGHT", 4, 0)
-        r.nameTxt:SetSize(256, 16)
+        r.nameTxt:SetSize(316, 16)
         r.nameTxt:SetJustifyH("LEFT")
         if r.nameTxt.SetWordWrap then r.nameTxt:SetWordWrap(false) end
 
         r.tierTxt = r:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
         r.tierTxt:SetPoint("LEFT", r.nameTxt, "RIGHT", 4, 0)
-        r.tierTxt:SetSize(162, 16)
+        r.tierTxt:SetSize(184, 16)
         r.tierTxt:SetJustifyH("LEFT")
         if r.tierTxt.SetWordWrap then r.tierTxt:SetWordWrap(false) end
 
         r.statTxt = r:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
         r.statTxt:SetPoint("RIGHT", r, "RIGHT", -8, 0)
-        r.statTxt:SetSize(88, 16)
+        r.statTxt:SetSize(92, 16)
         r.statTxt:SetJustifyH("RIGHT")
         if r.statTxt.SetWordWrap then r.statTxt:SetWordWrap(false) end
 
@@ -2131,12 +2369,12 @@ local function BuildSettingsTab(parent)
 
     local leftCard = CreateFrame("Frame", nil, box)
     leftCard:SetPoint("TOPLEFT", box, "TOPLEFT", 0, 0)
-    leftCard:SetSize(326, 392)
+    leftCard:SetSize(368, 428)
     PS.StyleBox(leftCard, 0.50, false)
 
     local rightCard = CreateFrame("Frame", nil, box)
     rightCard:SetPoint("TOPLEFT", leftCard, "TOPRIGHT", 8, 0)
-    rightCard:SetSize(326, 392)
+    rightCard:SetSize(368, 428)
     PS.StyleBox(rightCard, 0.50, false)
 
     local lHdr = leftCard:CreateFontString(nil, "OVERLAY", "GameFontNormal")
@@ -2347,7 +2585,7 @@ AP.RaiseFrameFront = RaiseFrameFront
 local function CreateMainWindow()
     if mainFrame then return mainFrame end
     local f = CreateFrame("Frame", "AttuneParserFrame", UIParent)
-    f:SetSize(696, 548)
+    f:SetSize(780, 580)
     f:SetPoint("CENTER")
     f:SetFrameStrata("MEDIUM")
     f:SetToplevel(true)
@@ -2465,12 +2703,12 @@ local function CreateMainWindow()
     f.talBtn:SetScript("OnClick", function() AP:OpenTalorianUI() end)
 
     local tabDefs = {
-        { key = "top", label = "Топ инстов", w = 94 },
-        { key = "summary", label = "Обзор и Дары", w = 106 },
-        { key = "bags", label = "Сумки и Ковка", w = 114 },
-        { key = "sets", label = "Сеты T9 / T10", w = 110 },
-        { key = "settings", label = "Настройки", w = 88 },
-        { key = "server", label = "События и Боссы", w = 120 },
+        { key = "top", label = "Топ инстов", w = 108 },
+        { key = "summary", label = "Обзор и Дары", w = 122 },
+        { key = "bags", label = "Сумки и Ковка", w = 130 },
+        { key = "sets", label = "Сеты T9 / T10", w = 124 },
+        { key = "settings", label = "Настройки", w = 104 },
+        { key = "server", label = "События и Боссы", w = 131 },
     }
     f.tabBtns = {}
     f.tabPanels = {}

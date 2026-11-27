@@ -1508,9 +1508,9 @@ do
         local g = math.floor(c / 10000)
         local s = math.floor((c % 10000) / 100)
         if g > 0 then
-            return string.format("%dg %ds", g, s)
+            return string.format("%d зол. %d сер.", g, s)
         end
-        return string.format("%ds %dc", s, c % 100)
+        return string.format("%d сер. %d мед.", s, c % 100)
     end
 
     local lastAucErr = nil
@@ -4849,12 +4849,12 @@ function AP.BuildServerSyncTab(parent)
 
     local leftCard = CreateFrame("Frame", nil, box)
     leftCard:SetPoint("TOPLEFT", box, "TOPLEFT", 0, 0)
-    leftCard:SetSize(326, 392)
+    leftCard:SetSize(368, 428)
     PS.StyleBox(leftCard, 0.50, false)
 
     local rightCard = CreateFrame("Frame", nil, box)
     rightCard:SetPoint("TOPLEFT", leftCard, "TOPRIGHT", 8, 0)
-    rightCard:SetSize(326, 392)
+    rightCard:SetSize(368, 428)
     PS.StyleBox(rightCard, 0.50, false)
 
     local function MakeCheck(p, x, y, w, label, getFn, onClickFn, tip)
@@ -5096,7 +5096,7 @@ function AP.BuildServerSyncTab(parent)
 
     local statusTxt = rightCard:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     statusTxt:SetPoint("TOPLEFT", 10, -28)
-    statusTxt:SetSize(306, 102)
+    statusTxt:SetSize(348, 102)
     statusTxt:SetJustifyH("LEFT")
     statusTxt:SetJustifyV("TOP")
 
@@ -5215,11 +5215,11 @@ function AP.BuildServerSyncTab(parent)
 
     local wbListBox = CreateFrame("Frame", nil, rightCard)
     wbListBox:SetPoint("TOPLEFT", 10, -214)
-    wbListBox:SetSize(306, 168)
+    wbListBox:SetSize(348, 188)
     PS.StyleBox(wbListBox, 0.36, false)
 
     box.wbRows = {}
-    local WB_VIS = 8
+    local WB_VIS = 9
     local WB_H = 20
     local sf = PS.AttachScroll(wbListBox, WB_VIS * WB_H, WB_H, WB_VIS, function()
         local off = wbListBox.sf.offset or 0
@@ -5251,7 +5251,7 @@ function AP.BuildServerSyncTab(parent)
         r:SetPoint("TOPRIGHT", sf, "TOPRIGHT", -16, -(i - 1) * WB_H)
         r.nm = r:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
         r.nm:SetPoint("LEFT", 4, 0)
-        r.nm:SetSize(202, 14)
+        r.nm:SetSize(244, 14)
         r.nm:SetJustifyH("LEFT")
         if r.nm.SetWordWrap then r.nm:SetWordWrap(false) end
         r.cd = r:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
