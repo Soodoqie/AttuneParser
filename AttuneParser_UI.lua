@@ -306,7 +306,7 @@ local STAT_NAMES = {
     [12] = "Защита", [13] = "Уклонение", [14] = "Парирование", [15] = "Блок щитом",
     [31] = "Меткость", [32] = "Крит. удар", [35] = "Устойчивость", [36] = "Скорость",
     [37] = "Мастерство", [38] = "Сила атаки", [44] = "Пробивание брони", [45] = "Сила заклинаний",
-    [46] = "Восст. маны", [47] = "Проник. заклинаний", [48] = "Показатель блока",
+    [46] = "Восстановление маны", [47] = "Проник. заклинаний", [48] = "Показатель блока",
 }
 
 local function FormatLocation(w)
@@ -526,7 +526,7 @@ local function BuildTopTab(parent)
         box.RefreshData()
     end)
 
-    local syncBtn = PS.MakeBtn(filterBar, 76, 22, "Синхр.", "green")
+    local syncBtn = PS.MakeBtn(filterBar, 82, 22, "Обновить", "green")
     syncBtn:SetPoint("TOPRIGHT", filterBar, "TOPRIGHT", -6, -6)
     syncBtn:SetScript("OnClick", function()
         AP:RequestServerSync(true)
@@ -798,7 +798,7 @@ local function BuildTopTab(parent)
                     z.forgeCount or 0, z.forgeRemainStats or 0), 1, 1, 1)
                 local fb = z.forgeByTier or {}
                 if (fb[0] or 0) + (fb[1] or 0) + (fb[2] or 0) > 0 then
-                    GameTooltip:AddLine(string.format("  Разбивка ковки: Погл(20%%)=%d, Эп(35%%)=%d, Лег(60%%)=%d",
+                    GameTooltip:AddLine(string.format("  Разбивка ковки: Обычный=%d, Эпический=%d, Легендарный=%d",
                         fb[0] or 0, fb[1] or 0, fb[2] or 0), 0.85, 0.82, 0.72)
                 end
                 if z.byDiff and type(z.byDiff) == "table" then
@@ -806,7 +806,7 @@ local function BuildTopTab(parent)
                     local maxD = z.maxDiffs or 4
                     local dNames4 = { [1] = "10 об", [2] = "25 об", [3] = "10 гер", [4] = "25 гер" }
                     local dNames2R = { [1] = "10 об", [2] = "25 об" }
-                    local dNames2D = { [1] = "Обыч.", [2] = "Героич." }
+                    local dNames2D = { [1] = "Обычная", [2] = "Героическая" }
                     for dId, df in pairs(z.byDiff) do
                         if (df.newCount or 0) + (df.forgeCount or 0) > 0 then
                             if not hasDiff then
@@ -814,7 +814,7 @@ local function BuildTopTab(parent)
                                 GameTooltip:AddLine("|cffffd200По сложностям:|r", 1, 1, 1)
                                 hasDiff = true
                             end
-                            local dLbl = (maxD == 4 and dNames4[dId]) or (z.isRaid and dNames2R[dId]) or dNames2D[dId] or ("Сложн." .. tostring(dId))
+                            local dLbl = (maxD == 4 and dNames4[dId]) or (z.isRaid and dNames2R[dId]) or dNames2D[dId] or ("Сложность " .. tostring(dId))
                             GameTooltip:AddLine(string.format("  %s: нов=%d, ковка=%d, +стат=%d",
                                 dLbl, df.newCount or 0, df.forgeCount or 0, df.remainStats or 0), 0.85, 0.85, 0.85)
                         end
@@ -1278,7 +1278,7 @@ local function BuildSummaryTab(parent)
         local expElixStr = (g.hasExpElixir or eq.hasExpElixir) and "|cff40ff40ДА (x2)|r" or "|cff94a3b8нет|r"
         local guildStr = (eq.guildKnown == false) and "?" or string.format("+%d%%", eq.guildPct or 0)
         c2.body:SetText(string.format(
-            "Бонус дня: %s\n%s\nЭликсир погл.: %s | Эликсир опыта: %s\nМножитель: |cff40ff40x%.2g|r (Гильдия %s)\nЗапасы пыли (обмен %d:1 / %d:1)%s:\n  Мерцающая: |cffa335ee%d|r -> +%d Пылающей | Пылающая: |cffff8000%d|r -> +%d Астр.\n  Астральная: |cff38bdf8%d|r | Потенциал Титана: |cff40ff40%d|r (~%dg)\nСундуки: %d | Лед: %d (из Триумфа: +%d)\nДо ковки: ~%d кв. (обычн.) / %d (данж)",
+            "Бонус дня: %s\n%s\nЭликсир поглощения: %s | Эликсир опыта: %s\nМножитель: |cff40ff40x%.2g|r (Гильдия %s)\nЗапасы пыли (обмен %d:1 / %d:1)%s:\n  Мерцающая: |cffa335ee%d|r -> +%d Пылающей | Пылающая: |cffff8000%d|r -> +%d Астральной\n  Астральная: |cff38bdf8%d|r | Потенциал Титана: |cff40ff40%d|r (~%dg)\nСундуки: %d | Лед: %d (из Триумфа: +%d)\nДо ковки: ~%d кв. (обычных) / %d (данж)",
             g.active and ("|cffa855f7" .. (g.name or "Бонус") .. "|r (" .. (g.remText or "?") .. ")") or "|cff94a3b8нет|r",
             (g.desc and g.desc ~= "") and ("|cffb0a080" .. g.desc .. "|r") or "",
             g.hasElixir and "|cff40ff40ДА|r" or "|cff94a3b8нет|r",
@@ -1712,18 +1712,21 @@ local function BuildBagsTab(parent)
         local filtered = {}
         local readyCnt, forgeCnt, totGain, totForge, petCnt, blCnt = 0, 0, 0, 0, 0, 0
         for _, it in ipairs(cands) do
-            if it.where == "petloot" then petCnt = petCnt + 1 end
-            if it.isBlacklisted then blCnt = blCnt + 1 end
-            local wOk = (box.filterWhere == "all") or ((it.where or "bag") == box.filterWhere)
-            local bOk = (not box.hideBlacklist) or (not it.isBlacklisted)
-            if wOk and bOk then
-                table.insert(filtered, it)
-                if it.needsForgeUpgrade then
-                    forgeCnt = forgeCnt + 1
-                    totForge = totForge + (it.remainStats or 0)
-                else
-                    readyCnt = readyCnt + 1
-                    totGain = totGain + (it.gainNowStats or 0)
+            local isMk = (AP.IsMorKelItem and AP:IsMorKelItem(it.itemId)) or (AP.MORKEL_ITEMS and AP.MORKEL_ITEMS[it.itemId])
+            if not isMk then
+                if it.where == "petloot" then petCnt = petCnt + 1 end
+                if it.isBlacklisted then blCnt = blCnt + 1 end
+                local wOk = (box.filterWhere == "all") or ((it.where or "bag") == box.filterWhere)
+                local bOk = (not box.hideBlacklist) or (not it.isBlacklisted)
+                if wOk and bOk then
+                    table.insert(filtered, it)
+                    if it.needsForgeUpgrade then
+                        forgeCnt = forgeCnt + 1
+                        totForge = totForge + (it.remainStats or 0)
+                    else
+                        readyCnt = readyCnt + 1
+                        totGain = totGain + (it.gainNowStats or 0)
+                    end
                 end
             end
         end
@@ -1758,7 +1761,370 @@ local function BuildBagsTab(parent)
     return box
 end
 
--- Вкладка 4: Настройки AttuneParser
+-- Вкладка 4: Сеты T9 / T10 (отслеживание поглощения и ковки по ролям и уровням)
+local function BuildSetsTab(parent)
+    local box = CreateFrame("Frame", nil, parent)
+    box:SetAllPoints(parent)
+    box.tierFilter = "ALL"
+    box.classFilter = "HERO"
+    box.onlyIncomplete = false
+    box.selectedKey = nil
+    box.groups = {}
+    box.slots = {}
+
+    local topBar = CreateFrame("Frame", nil, box)
+    topBar:SetPoint("TOPLEFT", box, "TOPLEFT", 0, 0)
+    topBar:SetPoint("TOPRIGHT", box, "TOPRIGHT", 0, 0)
+    topBar:SetHeight(32)
+    PS.StyleBox(topBar, 0.50, false)
+
+    local tBtns = {}
+    local tDefs = {
+        { key = "ALL", label = "Все", w = 40 },
+        { key = "T9", label = "T9", w = 40 },
+        { key = "T10", label = "T10", w = 44 },
+    }
+    local tx = 6
+    for _, td in ipairs(tDefs) do
+        local b = PS.MakeBtn(topBar, td.w, 22, td.label, "dark")
+        b:SetPoint("LEFT", topBar, "LEFT", tx, 0)
+        tx = tx + td.w + 4
+        b:SetScript("OnClick", function()
+            box.tierFilter = td.key
+            box.RefreshData()
+        end)
+        tBtns[td.key] = b
+    end
+
+    local incBtn = PS.MakeBtn(topBar, 92, 22, "Скрыть 90%", "dark")
+    incBtn:SetPoint("LEFT", topBar, "LEFT", tx + 4, 0)
+    incBtn:SetScript("OnClick", function()
+        box.onlyIncomplete = not box.onlyIncomplete
+        box.RefreshData()
+    end)
+
+    local clsBtn = PS.MakeBtn(topBar, 102, 22, "Мой класс", "dark")
+    clsBtn:SetPoint("LEFT", incBtn, "RIGHT", 6, 0)
+    clsBtn:SetScript("OnClick", function()
+        box.classFilter = (box.classFilter == "HERO") and "ALL" or "HERO"
+        box.RefreshData()
+    end)
+
+    local refBtn = PS.MakeBtn(topBar, 74, 22, "Обновить", "dark")
+    refBtn:SetPoint("RIGHT", topBar, "RIGHT", -6, 0)
+    refBtn:SetScript("OnClick", function()
+        if type(AP.RequestWhereItemsSync) == "function" then AP:RequestWhereItemsSync() end
+        box.RefreshData()
+    end)
+
+    local warmBtn = PS.MakeBtn(topBar, 114, 22, "Прогреть кэш", "dark")
+    warmBtn:SetPoint("RIGHT", refBtn, "LEFT", -6, 0)
+    warmBtn:SetScript("OnClick", function()
+        if type(AP.WarmMorKelSetsCache) == "function" then
+            local n = AP:WarmMorKelSetsCache({
+                tierFilter = box.tierFilter,
+                classFilter = box.classFilter,
+                onlyIncomplete = box.onlyIncomplete,
+            })
+            if n == 0 and DEFAULT_CHAT_FRAME then
+                DEFAULT_CHAT_FRAME:AddMessage("|cff38bdf8[AttuneParser]|r Все вещи выбранных комплектов уже в кэше.")
+            end
+            box.RefreshData()
+        end
+    end)
+
+    local leftPane = CreateFrame("Frame", nil, box)
+    leftPane:SetPoint("TOPLEFT", topBar, "BOTTOMLEFT", 0, -6)
+    leftPane:SetPoint("BOTTOMLEFT", box, "BOTTOMLEFT", 0, 24)
+    leftPane:SetWidth(272)
+    PS.StyleBox(leftPane, 0.36, false)
+
+    local rightPane = CreateFrame("Frame", nil, box)
+    rightPane:SetPoint("TOPLEFT", leftPane, "TOPRIGHT", 8, 0)
+    rightPane:SetPoint("BOTTOMRIGHT", box, "BOTTOMRIGHT", 0, 24)
+    PS.StyleBox(rightPane, 0.40, false)
+
+    local rHdr = CreateFrame("Frame", nil, rightPane)
+    rHdr:SetPoint("TOPLEFT", rightPane, "TOPLEFT", 6, -6)
+    rHdr:SetPoint("TOPRIGHT", rightPane, "TOPRIGHT", -6, -6)
+    rHdr:SetHeight(48)
+    PS.StyleBox(rHdr, 0.55, false)
+
+    local rTitle = rHdr:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    rTitle:SetPoint("TOPLEFT", rHdr, "TOPLEFT", 8, -6)
+    rTitle:SetPoint("TOPRIGHT", rHdr, "TOPRIGHT", -8, -6)
+    rTitle:SetJustifyH("LEFT")
+    if rTitle.SetWordWrap then rTitle:SetWordWrap(false) end
+
+    local rSub = rHdr:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    rSub:SetPoint("TOPLEFT", rTitle, "BOTTOMLEFT", 0, -4)
+    rSub:SetPoint("TOPRIGHT", rHdr, "TOPRIGHT", -8, -26)
+    rSub:SetJustifyH("LEFT")
+    if rSub.SetWordWrap then rSub:SetWordWrap(false) end
+
+    local foot = box:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    foot:SetPoint("BOTTOMLEFT", box, "BOTTOMLEFT", 4, 2)
+    foot:SetPoint("BOTTOMRIGHT", box, "BOTTOMRIGHT", -4, 2)
+    foot:SetJustifyH("LEFT")
+
+    local SVIS, SROW_H = 11, 33
+    local lRows = {}
+    local sfLeft = PS.AttachScroll(leftPane, SVIS * SROW_H, SROW_H, SVIS, function() box.RenderLeft() end)
+    sfLeft:SetPoint("TOPLEFT", leftPane, "TOPLEFT", 4, -4)
+    sfLeft:SetPoint("BOTTOMRIGHT", leftPane, "BOTTOMRIGHT", -4, 4)
+
+    for i = 1, SVIS do
+        local r = CreateFrame("Button", nil, sfLeft)
+        r:SetHeight(SROW_H - 2)
+        r:SetPoint("TOPLEFT", sfLeft, "TOPLEFT", 0, -(i - 1) * SROW_H)
+        r:SetPoint("TOPRIGHT", sfLeft, "TOPRIGHT", -16, -(i - 1) * SROW_H)
+        PS.StyleScrollRow(r, (i % 2) == 1)
+
+        r.tTxt = r:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        r.tTxt:SetPoint("TOPLEFT", r, "TOPLEFT", 6, -3)
+        r.tTxt:SetPoint("TOPRIGHT", r, "TOPRIGHT", -56, -3)
+        r.tTxt:SetJustifyH("LEFT")
+        if r.tTxt.SetWordWrap then r.tTxt:SetWordWrap(false) end
+
+        r.bTxt = r:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        r.bTxt:SetPoint("BOTTOMLEFT", r, "BOTTOMLEFT", 6, 3)
+        r.bTxt:SetPoint("BOTTOMRIGHT", r, "BOTTOMRIGHT", -56, 3)
+        r.bTxt:SetJustifyH("LEFT")
+        if r.bTxt.SetWordWrap then r.bTxt:SetWordWrap(false) end
+
+        r.cntTxt = r:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        r.cntTxt:SetPoint("RIGHT", r, "RIGHT", -6, 0)
+        r.cntTxt:SetSize(48, 18)
+        r.cntTxt:SetJustifyH("RIGHT")
+
+        r:SetScript("OnClick", function(self)
+            if self._grp then
+                box.selectedKey = self._grp.key
+                box.RenderLeft()
+                box.SelectRight(false)
+            end
+        end)
+        lRows[i] = r
+    end
+    box.lRows = lRows
+
+    local RVIS, RROW_H = 6, 54
+    local slotBox = CreateFrame("Frame", nil, rightPane)
+    slotBox:SetPoint("TOPLEFT", rHdr, "BOTTOMLEFT", 0, -6)
+    slotBox:SetPoint("BOTTOMRIGHT", rightPane, "BOTTOMRIGHT", -6, 4)
+
+    local rRows = {}
+    local sfRight = PS.AttachScroll(slotBox, RVIS * RROW_H, RROW_H, RVIS, function() box.RenderRight() end)
+    sfRight:SetPoint("TOPLEFT", slotBox, "TOPLEFT", 0, 0)
+    sfRight:SetPoint("BOTTOMRIGHT", slotBox, "BOTTOMRIGHT", 0, 0)
+
+    for i = 1, RVIS do
+        local r = CreateFrame("Button", nil, sfRight)
+        r:SetHeight(RROW_H - 3)
+        r:SetPoint("TOPLEFT", sfRight, "TOPLEFT", 0, -(i - 1) * RROW_H)
+        r:SetPoint("TOPRIGHT", sfRight, "TOPRIGHT", -14, -(i - 1) * RROW_H)
+        PS.StyleScrollRow(r, (i % 2) == 1)
+
+        local icBox = CreateFrame("Frame", nil, r)
+        icBox:SetSize(34, 34)
+        icBox:SetPoint("LEFT", r, "LEFT", 6, 0)
+        PS.StyleBox(icBox, 0.75, false)
+        local ic = icBox:CreateTexture(nil, "ARTWORK")
+        ic:SetPoint("TOPLEFT", 2, -2)
+        ic:SetPoint("BOTTOMRIGHT", -2, 2)
+        ic:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+        r.icBox = icBox
+        r.ic = ic
+
+        r.nameTxt = r:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        r.nameTxt:SetPoint("TOPLEFT", icBox, "TOPRIGHT", 8, 2)
+        r.nameTxt:SetPoint("TOPRIGHT", r, "TOPRIGHT", -8, -5)
+        r.nameTxt:SetJustifyH("LEFT")
+        if r.nameTxt.SetWordWrap then r.nameTxt:SetWordWrap(false) end
+
+        r.progTxt = r:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        r.progTxt:SetPoint("TOPLEFT", r.nameTxt, "BOTTOMLEFT", 0, -3)
+        r.progTxt:SetSize(188, 14)
+        r.progTxt:SetJustifyH("LEFT")
+        if r.progTxt.SetWordWrap then r.progTxt:SetWordWrap(false) end
+
+        r.ownTxt = r:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        r.ownTxt:SetPoint("BOTTOMLEFT", icBox, "BOTTOMRIGHT", 8, -2)
+        r.ownTxt:SetPoint("RIGHT", r, "RIGHT", -8, 0)
+        r.ownTxt:SetJustifyH("LEFT")
+        if r.ownTxt.SetWordWrap then r.ownTxt:SetWordWrap(false) end
+
+        r:SetScript("OnClick", function(self)
+            local it = self._slot
+            if not it then return end
+            if IsControlKeyDown() and type(DressUpItemLink) == "function" then
+                local lnk = AP:GetItemHyperlink(it.eid, nil, it.name, it.quality)
+                if lnk then pcall(DressUpItemLink, lnk) end
+            elseif IsShiftKeyDown() or (IsModifiedClick and IsModifiedClick("CHATLINK")) then
+                AP:InsertItemLink(it.eid, nil, it.name, it.quality)
+            end
+        end)
+        r:SetScript("OnEnter", function(self)
+            local it = self._slot
+            if not it then return end
+            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+            local exLine = it.owned
+                and string.format("У вас (%s): ковка %s", FormatLocation(it.owned.where), (AP.TIER_NAMES and AP.TIER_NAMES[it.ownedForge or 0]) or "Обычный")
+                or "Предмета пока нет в сумках/банке"
+            AP:BuildItemTooltip(GameTooltip, it.eid, {
+                name = it.name,
+                quality = it.quality,
+                extraLine = exLine,
+                hint = "|cff94a3b8Shift+ЛКМ: в чат | Ctrl+ЛКМ: примерить|r",
+            })
+            GameTooltip:Show()
+        end)
+        r:SetScript("OnLeave", function() GameTooltip:Hide() end)
+        rRows[i] = r
+    end
+    box.rRows = rRows
+
+    function box.RenderLeft()
+        local off = sfLeft.offset or 0
+        for i = 1, SVIS do
+            local r = lRows[i]
+            local g = box.groups[off + i]
+            if not g then
+                r._grp = nil
+                r:Hide()
+            else
+                r._grp = g
+                r:Show()
+                local sel = (g.key == box.selectedKey)
+                PS.StyleBox(r, sel and 0.65 or ((i % 2) == 1 and 0.42 or 0.25), sel)
+                local facTag = (g.fac == "A" and "|cff38bdf8[А]|r ") or (g.fac == "H" and "|cffff6060[О]|r ") or ""
+                local ilv = (g.gradeIlvl and g.gradeIlvl > 0) and (" (" .. g.gradeIlvl .. ")") or ""
+                r.tTxt:SetText(facTag .. "|cffffd200" .. g.gradeLabel .. "|r" .. ilv .. " - " .. g.role)
+                local owTxt = (g.ownedCount > 0) and (" |cff60a5fa(в наличии: " .. g.ownedCount .. ")|r") or ""
+                local remTxt = (g.remainStats > 0) and string.format("|cffffd200+%d стат|r", g.remainStats) or "|cff40ff40Закрыто|r"
+                r.bTxt:SetText(((box.classFilter == "ALL") and (g.className .. ": ") or "") .. remTxt .. owTxt)
+                local tot = #g.items
+                local col = (g.doneTit >= tot and tot > 0) and "|cff40ff40" or (g.inProg > 0 and "|cffffd200" or "|cff94a3b8")
+                r.cntTxt:SetText(string.format("%s%d/%d|r", col, g.doneTit, tot))
+            end
+        end
+    end
+
+    function box.RenderRight()
+        local selGrp = nil
+        for _, g in ipairs(box.groups) do
+            if g.key == box.selectedKey then selGrp = g; break end
+        end
+        if not selGrp then
+            rTitle:SetText("|cff94a3b8Нет комплектов под выбранный фильтр|r")
+            rSub:SetText("Попробуйте отключить «Скрыть 90%» или сменить фильтр тира.")
+            box.slots = {}
+            for i = 1, RVIS do rRows[i]._slot = nil; rRows[i]:Hide() end
+            return
+        end
+        local ilv = (selGrp.gradeIlvl and selGrp.gradeIlvl > 0) and (" (ilvl " .. selGrp.gradeIlvl .. ")") or ""
+        rTitle:SetText(string.format("|cffffd200%s|r - %s [%s]%s", selGrp.name, selGrp.role, selGrp.gradeLabel, ilv))
+        local stk = AP.GetForgeMaterialStock and AP:GetForgeMaterialStock() or {}
+        rSub:SetText(string.format("Титанический (90%%): |cff40ff40%d/%d|r | До 90%%: |cffffd200+%d стат|r | Эмблемы Триумфа: %d | Льда: %d",
+            selGrp.doneTit, #selGrp.items, selGrp.remainStats, stk.triumphEmblem or 0, stk.frostEmblem or 0))
+        box.slots = selGrp.items
+        local off = sfRight.offset or 0
+        for i = 1, RVIS do
+            local r = rRows[i]
+            local it = box.slots[off + i]
+            if not it then
+                r._slot = nil
+                r:Hide()
+            else
+                r._slot = it
+                r:Show()
+                r.ic:SetTexture(it.tex or "Interface\\Icons\\INV_Misc_QuestionMark")
+                r.nameTxt:SetText("|cff94a3b8[" .. it.slotLabel .. "]|r " .. ShortItemLink(it.eid, it.name, it.quality))
+                if it.isCompleted then
+                    r.progTxt:SetText("|cff40ff40Поглощение: Титанический (90%)|r")
+                    PS.StyleBox(r.icBox, 0.75, false)
+                    r.icBox:SetBackdropBorderColor(0.0, 1.0, 0.8, 0.9)
+                elseif it.doneTier >= 0 then
+                    local tNm = it.doneTierName or (AP.TIER_NAMES and AP.TIER_NAMES[it.doneTier]) or "?"
+                    r.progTxt:SetText(string.format("|cffffd200Поглощение: %s (%d%%)|r -> ост. +%d стат", tNm, it.curPct or 0, it.remainStats or 0))
+                    PS.StyleBox(r.icBox, 0.75, false)
+                    r.icBox:SetBackdropBorderColor(1.0, 0.55, 0.1, 0.9)
+                else
+                    r.progTxt:SetText(string.format("|cff94a3b8Не поглощено (0%%)|r | До 90%%: +%d стат", it.remainStats or 0))
+                    PS.StyleBox(r.icBox, 0.55, false)
+                    r.icBox:SetBackdropBorderColor(0.45, 0.38, 0.22, 0.82)
+                end
+                if it.owned then
+                    local fNm = (AP.TIER_NAMES and AP.TIER_NAMES[it.ownedForge or 0]) or "Обычный"
+                    local aps = math.max(0, 3 - (it.ownedForge or 0))
+                    local upgTxt = it.isCompleted and "" or (it.readyToAbsorb and " | |cff40ff40можно поглотить!|r" or (aps > 0 and (" -> еще " .. aps .. (aps == 1 and " шаг ковки" or " шага ковки")) or ""))
+                    r.ownTxt:SetText("В наличии [" .. FormatLocation(it.owned.where) .. "] " .. fNm .. upgTxt)
+                else
+                    r.ownTxt:SetText("|cff888888Нет в сумках, на персонаже или в банке|r")
+                end
+            end
+        end
+    end
+
+    function box.SelectRight(keepOffset)
+        local selGrp = nil
+        for _, g in ipairs(box.groups) do
+            if g.key == box.selectedKey then selGrp = g; break end
+        end
+        box.slots = selGrp and selGrp.items or {}
+        sfRight:SetTotal(#box.slots, keepOffset)
+    end
+
+    function box.RefreshData()
+        for k, b in pairs(tBtns) do PS.PaintBtn(b, (box.tierFilter == k) and "gold" or "dark") end
+        PS.PaintBtn(incBtn, box.onlyIncomplete and "green" or "dark")
+        PS.PaintBtn(clsBtn, (box.classFilter == "ALL") and "gold" or "dark")
+        clsBtn.label:SetText((box.classFilter == "ALL") and "Все классы" or "Мой класс")
+
+        if type(AP.GetMorKelSetsProgress) ~= "function" then
+            box.groups = {}
+            box.slots = {}
+            sfLeft:SetTotal(0, false)
+            sfRight:SetTotal(0, false)
+            foot:SetText("|cff94a3b8Данные сетов загружаются...|r")
+            return
+        end
+
+        local res = AP:GetMorKelSetsProgress({
+            tierFilter = box.tierFilter,
+            classFilter = box.classFilter,
+            onlyIncomplete = box.onlyIncomplete,
+        })
+        box.groups = res.groups or {}
+        local keepSel = false
+        for _, g in ipairs(box.groups) do
+            if g.key == box.selectedKey then keepSel = true; break end
+        end
+        if not keepSel then
+            box.selectedKey = box.groups[1] and box.groups[1].key or nil
+        end
+        sfLeft:SetTotal(#box.groups, keepSel)
+        box.SelectRight(keepSel)
+
+        if res.warming then
+            warmBtn.label:SetText("Кэш: " .. (res.warmRemaining or 0) .. "...")
+            PS.PaintBtn(warmBtn, "green")
+        elseif (res.uncachedCount or 0) > 0 then
+            warmBtn.label:SetText("Прогреть (" .. res.uncachedCount .. ")")
+            PS.PaintBtn(warmBtn, "dark")
+        else
+            warmBtn.label:SetText("Кэш готов")
+            PS.PaintBtn(warmBtn, "dark")
+        end
+
+        foot:SetText(string.format("|cffb0a080Наборов: %d | Закрыто (90%%): |cff40ff40%d/%d|r|cffb0a080 | В процессе: |cffffd200%d|r|cffb0a080 | На руках: %d | До 90%%: |cffffd200+%d стат|r",
+            #box.groups, res.totalTit or 0, res.totalPieces or 0, res.totalInProg or 0, res.totalOwned or 0, res.totalRemainStats or 0))
+    end
+
+    return box
+end
+
+-- Вкладка 5: Настройки AttuneParser
 local function BuildSettingsTab(parent)
     local box = CreateFrame("Frame", nil, parent)
     box:SetAllPoints(parent)
@@ -2078,11 +2444,12 @@ local function CreateMainWindow()
     f.talBtn:SetScript("OnClick", function() AP:OpenTalorianUI() end)
 
     local tabDefs = {
-        { key = "top", label = "Топ инстов", w = 112 },
-        { key = "summary", label = "Обзор и Дары", w = 122 },
-        { key = "bags", label = "Сумки и Ковка", w = 126 },
-        { key = "settings", label = "Настройки", w = 98 },
-        { key = "server", label = "События и Боссы", w = 142 },
+        { key = "top", label = "Топ инстов", w = 94 },
+        { key = "summary", label = "Обзор и Дары", w = 106 },
+        { key = "bags", label = "Сумки и Ковка", w = 114 },
+        { key = "sets", label = "Сеты T9 / T10", w = 110 },
+        { key = "settings", label = "Настройки", w = 88 },
+        { key = "server", label = "События и Боссы", w = 120 },
     }
     f.tabBtns = {}
     f.tabPanels = {}
@@ -2090,7 +2457,7 @@ local function CreateMainWindow()
     for _, td in ipairs(tabDefs) do
         local tb = PS.MakeBtn(f, td.w, 26, td.label, "dark")
         tb:SetPoint("TOPLEFT", f, "TOPLEFT", tx, -58)
-        tx = tx + td.w + 6
+        tx = tx + td.w + 5
         tb:SetScript("OnClick", function() AP:OpenUI(td.key) end)
         f.tabBtns[td.key] = tb
     end
@@ -2103,6 +2470,7 @@ local function CreateMainWindow()
     f.tabPanels.top = BuildTopTab(content)
     f.tabPanels.summary = BuildSummaryTab(content)
     f.tabPanels.bags = BuildBagsTab(content)
+    f.tabPanels.sets = BuildSetsTab(content)
     f.tabPanels.settings = BuildSettingsTab(content)
     f.tabPanels.server = (type(AP.BuildServerSyncTab) == "function") and AP.BuildServerSyncTab(content) or CreateFrame("Frame", nil, content)
 
@@ -2265,9 +2633,15 @@ do
             if gift.active then
                 GameTooltip:AddLine("Дар недели: |cffa855f7" .. (gift.name or "?") .. "|r (" .. (gift.remText or "?") .. ")", 1, 1, 1)
             end
-            local bags = AP:GetOwnedUpgradeCandidates(nil, true)
-            if #bags > 0 then
-                GameTooltip:AddLine("Вещей к поглощению/ковке: |cff40ff40" .. #bags .. "|r", 1, 1, 1)
+            local bagsRaw = AP:GetOwnedUpgradeCandidates(nil, true)
+            local bagsCount = 0
+            local mkMap = AP.MORKEL_ITEMS
+            for _, it in ipairs(bagsRaw) do
+                local isMk = (AP.IsMorKelItem and AP:IsMorKelItem(it.itemId)) or (mkMap and mkMap[it.itemId])
+                if not isMk then bagsCount = bagsCount + 1 end
+            end
+            if bagsCount > 0 then
+                GameTooltip:AddLine("Вещей к поглощению/ковке: |cff40ff40" .. bagsCount .. "|r", 1, 1, 1)
             end
             local talLoaded, talTtpOn, talBridgeOn = false, true, AP:IsTalorianBridgeActive()
             if type(AP.GetTalorianStatus) == "function" then

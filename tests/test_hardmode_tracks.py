@@ -328,11 +328,11 @@ end
 AP_CORE_SHIM = r'''
 AttuneParserDB = AttuneParserDB or { settings = {} }
 local AP = {
-    VERSION = "1.1.1",
+    VERSION = "1.1.2",
     _isShim = true,
     Data = { BuildInfo = { items = 18106 }, Zones = {}, TopMap = {}, Creatures = {} },
     TIER_PCT = { [0] = 20, [1] = 45, [2] = 75, [3] = 100 },
-    TIER_NAMES = { [0] = "Обыч.", [1] = "Эпик", [2] = "Лег.", [3] = "Титан." },
+    TIER_NAMES = { [0] = "Обычный", [1] = "Эпический", [2] = "Легендарный", [3] = "Титанический" },
     FORGE_ITEM_IDS = { dustEpic = 70017, dustLeg = 70018, dustTit = 70019, titanBoxes = { 90636 }, frostEmblem = 49426, triumphEmblem = 47241 },
     autoSwap = { on = false, groupMask = 3, qualMask = 60, orderWorst = false, boeAllowed = false, unlocked = false, sellMask = 0, srcMask = 2, confirm = true, active = false, blacklist = {} },
     bagum = { open = false, dustEn = true, r1 = 3, r2 = 3, fee = 1000000 },
@@ -577,12 +577,13 @@ def run_tests():
     AP:SetAutoAbsorbGroupBit(4, true)
     assert(AP.autoSwap.groupMask == 7, "AAMASK failed")
 
-    -- Test 5: ALL AttuneParser tabs including "server" (via AttuneParser_Integrations)
-    for _, tabName in ipairs({ "top", "summary", "bags", "settings", "server" }) do
+    -- Test 5: ALL AttuneParser tabs including "sets" and "server" (via AttuneParser_Integrations)
+    for _, tabName in ipairs({ "top", "summary", "bags", "sets", "settings", "server" }) do
         AP:OpenUI(tabName)
         assert(AttuneParserFrame and AttuneParserFrame:IsShown() and AttuneParserFrame.activeTab == tabName, "AP tab failed: " .. tabName)
     end
     assert(AttuneParserFrame.tabPanels.server.wbRows ~= nil, "ServerSync tab was not populated!")
+    assert(AttuneParserFrame.tabPanels.sets and AttuneParserFrame.tabPanels.sets.lRows ~= nil and AttuneParserFrame.tabPanels.sets.rRows ~= nil, "MorKel sets tab was not populated!")
 
     -- Test 6: TalorianTP Track 2 (buffs, retinue, GoldVault, Pepe throttle & mask)
     SC:ToggleTalBuffBit(0, false)
@@ -1991,6 +1992,113 @@ SUITE_21DE_LUA = r'''
     if AP.serverSync and AP.serverSync.ib then AP.serverSync.ib.items = {} end
     AP.forgeBag = {}
     AP:InvalidateCaches(true)
+
+    -- 21h: Mor'Kel T9/T10 exclusion from "Сумки и Ковка" (while keeping non-Mor'Kel sets) + Sets Tab tracker!
+    assert(type(AP.MORKEL_SETS) == "table" and #AP.MORKEL_SETS == 57, "21h: expected 57 MorKel sets, got " .. tostring(AP.MORKEL_SETS and #AP.MORKEL_SETS))
+    local mkItemCount = 0
+    for _ in pairs(AP.MORKEL_ITEMS or {}) do mkItemCount = mkItemCount + 1 end
+    assert(mkItemCount == 855, "21h: expected 855 MorKel set items, got " .. tostring(mkItemCount))
+    assert(AP:IsMorKelItem(48640) and AP:IsMorKelItem(51170) and (not AP:IsMorKelItem(45320)) and (not AP:IsMorKelItem(88802)),
+        "21h: IsMorKelItem mismatch for T9/T10 vs T8/non-set!")
+
+    local _origGCS21h, _origGCL21h, _origCAIS21h, _origGII21h =
+        _G.GetContainerNumSlots, _G.GetContainerItemLink, _G.CustomAttuneItemStatus, _G.GetItemInfo
+    local _origCAP21h, _origCAAT21h = _G.CustomAttuneProgress, _G.CustomAttuneAbsorbedTier
+    _G.GetContainerNumSlots = function(b) return b == 0 and 4 or 0 end
+    _G.GetContainerItemLink = function(b, s)
+        if b ~= 0 then return nil end
+        if s == 1 then return "|cffa335ee|Hitem:48640:0:0:0:0:0:0:0:80|h[Шлем триумфа Туралиона]|h|r" end
+        if s == 2 then return "|cffa335ee|Hitem:51170:0:0:0:0:0:0:0:80|h[Освященный полный шлем клятвы Свету]|h|r" end
+        if s == 3 then return "|cffa335ee|Hitem:45320:0:0:0:0:0:0:0:80|h[Латные наплечники Завоевателя эгиды]|h|r" end
+        if s == 4 then return "|cffa335ee|Hitem:88802:0:0:0:0:0:0:0:80|h[ТестНеСет]|h|r" end
+        return nil
+    end
+    _G.GetItemInfo = function(arg)
+        local id = type(arg) == "number" and arg or tonumber(tostring(arg):match("item:(%d+)"))
+        if id == 48640 then return "Шлем триумфа Туралиона", "|cffa335ee|Hitem:48640:0:0:0:0:0:0:0:80|h[Шлем триумфа Туралиона]|h|r", 4, 245, 80, "Доспехи", "Латы", 1, "INVTYPE_HEAD", "Interface\\Icons\\INV_Helmet_01", 50000 end
+        if id == 51170 then return "Освященный полный шлем клятвы Свету", "|cffa335ee|Hitem:51170:0:0:0:0:0:0:0:80|h[Освященный полный шлем клятвы Свету]|h|r", 4, 264, 80, "Доспехи", "Латы", 1, "INVTYPE_HEAD", "Interface\\Icons\\INV_Helmet_02", 50000 end
+        if id == 45320 then return "Латные наплечники Завоевателя эгиды", "|cffa335ee|Hitem:45320:0:0:0:0:0:0:0:80|h[Латные наплечники Завоевателя эгиды]|h|r", 4, 226, 80, "Доспехи", "Латы", 1, "INVTYPE_SHOULDER", "Interface\\Icons\\INV_Shoulder_01", 50000 end
+        if id == 88802 then return "ТестНеСет", "|cffa335ee|Hitem:88802:0:0:0:0:0:0:0:80|h[ТестНеСет]|h|r", 4, 245, 80, "Доспехи", "Латы", 1, "INVTYPE_CHEST", "Interface\\Icons\\INV_Chest_Chain", 50000 end
+        if _origGII21h then return _origGII21h(arg) end
+        return nil
+    end
+    _G.CustomAttuneProgress = function(eid, sfx)
+        if eid == 51170 then return nil end
+        if eid == 48640 or eid == 45320 or eid == 88802 then return 0, nil, 0, 0 end
+        if _origCAP21h then return _origCAP21h(eid, sfx) end
+        return nil
+    end
+    _G.CustomAttuneAbsorbedTier = function(eid, sfx)
+        if eid == 51170 then return -1 end
+        if eid == 48640 or eid == 45320 or eid == 88802 then return 0 end
+        if _origCAAT21h then return _origCAAT21h(eid, sfx) end
+        return nil
+    end
+    _G.CustomAttuneItemStatus = function(eid, forge, sfx)
+        if eid == 51170 then return false, false, 0, true end
+        if eid == 48640 or eid == 45320 or eid == 88802 then return true, false, 100, true end
+        if _origCAIS21h then return _origCAIS21h(eid, forge, sfx) end
+        return false, false, 0, true
+    end
+    _G.PRIME_ItemBank.items = {
+        { guid = 99101, entry = 51170, suffix = 0, perm = 0, g1 = 0, g2 = 0, g3 = 0, forge = 0, tier = 0, flags = 1, added = 1, dsp = 0, link = "item:51170:0:0:0:0:0:0" },
+        { guid = 99102, entry = 48640, suffix = 0, perm = 0, g1 = 0, g2 = 0, g3 = 0, forge = 0, tier = 0, flags = 1, added = 1, dsp = 0, link = "item:48640:0:0:0:0:0:0" },
+        { guid = 99103, entry = 45320, suffix = 0, perm = 0, g1 = 0, g2 = 0, g3 = 0, forge = 0, tier = 0, flags = 1, added = 1, dsp = 0, link = "item:45320:0:0:0:0:0:0" },
+        { guid = 99104, entry = 88802, suffix = 0, perm = 0, g1 = 0, g2 = 0, g3 = 0, forge = 0, tier = 0, flags = 1, added = 1, dsp = 0, link = "item:88802:0:0:0:0:0:0" },
+    }
+    _G.PRIME_ItemBank.byGuid = {
+        [99101] = _G.PRIME_ItemBank.items[1], [99102] = _G.PRIME_ItemBank.items[2],
+        [99103] = _G.PRIME_ItemBank.items[3], [99104] = _G.PRIME_ItemBank.items[4],
+    }
+    AP.forgeBag = { [0] = { [1] = 0, [3] = 0, [4] = 0 } }
+    if AP.serverSync and AP.serverSync.ib then AP.serverSync.ib.items = _G.PRIME_ItemBank.items end
+    AP:InvalidateCaches(true)
+
+    AP:OpenUI("bags")
+    local bagsPanel21h = AttuneParserFrame and AttuneParserFrame.tabPanels and AttuneParserFrame.tabPanels.bags
+    local sawMkBag, saw45320Bag, saw88802Bag = false, false, false
+    for _, rd in ipairs((bagsPanel21h and bagsPanel21h.data) or {}) do
+        if rd.itemId == 48640 or rd.itemId == 51170 then sawMkBag = true end
+        if rd.itemId == 45320 then saw45320Bag = true end
+        if rd.itemId == 88802 then saw88802Bag = true end
+    end
+    assert((not sawMkBag) and saw45320Bag and saw88802Bag,
+        "21h: BuildBagsTab must hide MorKel sets (48640/51170) while keeping non-MorKel set 45320 and 88802! mk=" .. tostring(sawMkBag) .. " t8=" .. tostring(saw45320Bag) .. " n8=" .. tostring(saw88802Bag))
+
+    local progAll = AP:GetMorKelSetsProgress({ classFilter = "ALL" })
+    assert(progAll and #progAll.groups == 171 and progAll.totalPieces == 855,
+        "21h: GetMorKelSetsProgress(ALL) must return 171 groups / 855 pieces! got g=" .. tostring(progAll and #progAll.groups) .. " p=" .. tostring(progAll and progAll.totalPieces))
+    local found48640Slot, found51170Slot = nil, nil
+    for _, g in ipairs(progAll.groups) do
+        for _, it in ipairs(g.items or {}) do
+            if it.eid == 48640 then found48640Slot = it end
+            if it.eid == 51170 then found51170Slot = it end
+        end
+    end
+    assert(found48640Slot and found48640Slot.owned and found48640Slot.curPct == (AP.TIER_PCT[0] or 20),
+        "21h: 48640 must appear in MorKel progress as owned at 20%! got=" .. tostring(found48640Slot and found48640Slot.curPct))
+    assert(found51170Slot and found51170Slot.owned and (found51170Slot.curPct or 0) == 0,
+        "21h: 51170 must appear in MorKel progress as owned unabsorbed!")
+
+    local progPl = AP:GetMorKelSetsProgress({ classFilter = "HERO" })
+    assert(progPl and #progPl.groups >= 12, "21h: HERO class filter (WARRIOR Alliance) must match >= 12 sub-tier groups! got=" .. tostring(progPl and #progPl.groups))
+    for _, g in ipairs(progPl.groups) do
+        assert(g.cls == "WARRIOR", "21h: HERO classFilter leaked non-WARRIOR set: " .. tostring(g.cls))
+    end
+
+    AP:OpenUI("sets")
+    local setsPanel21h = AttuneParserFrame and AttuneParserFrame.tabPanels and AttuneParserFrame.tabPanels.sets
+    assert(setsPanel21h and setsPanel21h:IsShown() and #(setsPanel21h.groups or {}) >= 4 and #(setsPanel21h.slots or {}) >= 5,
+        "21h: BuildSetsTab did not render groups/slots! g=" .. tostring(setsPanel21h and #(setsPanel21h.groups or {})) .. " s=" .. tostring(setsPanel21h and #(setsPanel21h.slots or {})))
+
+    _G.GetContainerNumSlots, _G.GetContainerItemLink, _G.CustomAttuneItemStatus, _G.GetItemInfo =
+        _origGCS21h, _origGCL21h, _origCAIS21h, _origGII21h
+    _G.CustomAttuneProgress, _G.CustomAttuneAbsorbedTier = _origCAP21h, _origCAAT21h
+    _G.PRIME_ItemBank.items = {}
+    _G.PRIME_ItemBank.byGuid = {}
+    if AP.serverSync and AP.serverSync.ib then AP.serverSync.ib.items = {} end
+    AP.forgeBag = {}
+    AP:InvalidateCaches(true)
     return "SUITE_21DE_PASSED"
 '''
 
@@ -2023,7 +2131,7 @@ def run_real_attune_parser_core_tests():
     NUM_BROWSE_TO_DISPLAY = 8
     FauxScrollFrame_GetOffset = function() return 0 end
     ''')
-    for rel in [r"AttuneParser\AttuneParser_Data.lua", r"AttuneParser\AttuneParser.lua", r"AttuneParser\AttuneParser_UI.lua"]:
+    for rel in [r"AttuneParser\AttuneParser_Data.lua", r"AttuneParser\AttuneParser_Data2.lua", r"AttuneParser\AttuneParser.lua", r"AttuneParser\AttuneParser_UI.lua"]:
         p = resolve_addon_path(rel)
         with open(p, "r", encoding="utf-8") as fh:
             lua2.execute(fh.read())
@@ -2158,6 +2266,7 @@ def run_standalone_integrations_tests():
     ''')
     for rel in [
         r"AttuneParser\AttuneParser_Data.lua",
+        r"AttuneParser\AttuneParser_Data2.lua",
         r"AttuneParser\AttuneParser.lua",
         r"AttuneParser\AttuneParser_UI.lua",
         r"AttuneParser\AttuneParser_Integrations.lua",
@@ -2171,6 +2280,7 @@ def run_standalone_integrations_tests():
     AttuneParser:OpenUI("top")
     AttuneParser:OpenUI("summary")
     AttuneParser:OpenUI("bags")
+    AttuneParser:OpenUI("sets")
     AttuneParser:OpenUI("settings")
     AttuneParser:OpenUI("server")
     ''')

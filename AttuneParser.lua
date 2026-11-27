@@ -9,7 +9,7 @@
 local AP = _G.AttuneParser or {}
 _G.AttuneParser = AP
 
-AP.VERSION = "1.1.1"
+AP.VERSION = "1.1.2"
 AP.Data = AP.Data or {}
 
 -- User-confirmed server tier defaults (replaced live when ASMSG_ATTUNE_TIERS arrives)
@@ -540,11 +540,11 @@ do
             [3] = "0070dd", [4] = "a335ee", [5] = "ff8000", [6] = "e6cc80",
         }
         local STAT_SHORT = {
-            [3] = "Лов", [4] = "Сил", [5] = "Инт", [6] = "Дух", [7] = "Вын",
-            [12] = "Защ", [13] = "Укл", [14] = "Пар", [15] = "Блк",
-            [31] = "Мет", [32] = "Крит", [35] = "Уст", [36] = "Скор",
-            [37] = "Маст", [38] = "АП", [44] = "РПБ", [45] = "СПД",
-            [46] = "МР5", [47] = "Прон", [48] = "Блок",
+            [3] = "Ловкость", [4] = "Сила", [5] = "Интеллект", [6] = "Дух", [7] = "Выносливость",
+            [12] = "Защита", [13] = "Уклонение", [14] = "Парирование", [15] = "Блок",
+            [31] = "Меткость", [32] = "Крит", [35] = "Устойчивость", [36] = "Скорость",
+            [37] = "Мастерство", [38] = "АП", [44] = "РПБ", [45] = "СПД",
+            [46] = "МР5", [47] = "Проник. способн.", [48] = "Показ. блока",
         }
 
         function AP:GetItemHyperlink(itemId, sfxOrLink, nameHint, qualHint)
@@ -747,7 +747,7 @@ do
                 tt:AddLine(opts.extraLine, 0.4, 1, 0.55)
             end
             if AP:IsItemBlacklisted(eid, opts.tier) then
-                tt:AddLine("|cffff5050В черном списке Автосвапа!|r", 1, 1, 1)
+                tt:AddLine("|cffff5050В черном списке автопродажи!|r", 1, 1, 1)
             end
 
             local g = AP.GetActiveDailyGift and AP:GetActiveDailyGift(false) or nil
@@ -1717,7 +1717,7 @@ do
     local DIFF_SHORT_4 = { [8] = "25г", [4] = "10г", [2] = "25о", [1] = "10о" }
     local DIFF_LONG_2R = { [2] = "25 об", [1] = "10 об" }
     local DIFF_SHORT_2R = { [2] = "25о", [1] = "10о" }
-    local DIFF_LONG_2D = { [2] = "Героич.", [1] = "Обыч." }
+    local DIFF_LONG_2D = { [2] = "Героический", [1] = "Обычный" }
     local DIFF_SHORT_2D = { [2] = "Гер", [1] = "Об" }
 
     function AP:GetItemDiffTag(itemId, zoneIdHint, diffMaskHint, longForm)
@@ -2668,7 +2668,7 @@ do
                             info.auctionIndex = idx
                             info.buyout = buyout or 0
                             info.lotTier = info.isNew and 0 or nil
-                            info.lotTierName = info.isNew and (AP.TIER_NAMES[0] or "Обыч.") or "Нужна ковка"
+                            info.lotTierName = info.isNew and (AP.TIER_NAMES[0] or "Обычный") or "Нужна ковка"
                             info.needsForgeCheck = not info.isNew
                             info.gainNowPct = info.isNew and (info.newBasePct or AP.TIER_PCT[0] or 20) or 0
                             info.gainNowStats = info.isNew and (info.newImmediateStats or 0) or 0
@@ -3471,7 +3471,7 @@ do
 
     function AP:ScanPetLootJunk(cat)
         if not AP:CanPetLootJunk() then
-            DEFAULT_CHAT_FRAME:AddMessage("|cffffd200[AttuneParser]|r Массовое расщепление хлама доступно с профессией 'Расщепление эссенций' (протокол 10; откройте Кладбошу хотя бы раз).")
+            DEFAULT_CHAT_FRAME:AddMessage("|cffffd200[AttuneParser]|r Массовое расщепление хлама доступно с профессией 'Расщепление эссенций' (навык 10; откройте Сборщик хотя бы раз).")
             return false
         end
         AP.petLootJunk = AP.petLootJunk or {}
@@ -4212,7 +4212,7 @@ do
                 AP:ToggleUI("top")
                 return
             end
-        elseif msg == "top" or msg == "summary" or msg == "bags" or msg == "settings" then
+        elseif msg == "top" or msg == "summary" or msg == "bags" or msg == "sets" or msg == "settings" then
             if type(AP.OpenUI) == "function" then
                 AP:OpenUI(msg)
                 return
@@ -4293,9 +4293,14 @@ do
         elseif msg == "scan" then
             AP:InvalidateCaches(false)
             local n = AP:StartBackgroundScan()
-            DEFAULT_CHAT_FRAME:AddMessage("|cff38bdf8[AttuneParser]|r Фоновый до-скан запущен (" .. n .. " предм. вне WDB).")
+            DEFAULT_CHAT_FRAME:AddMessage("|cff38bdf8[AttuneParser]|r Фоновый до-скан запущен (" .. n .. " предметов вне кэша).")
         elseif msg == "bags" then
-            local cands = AP:GetOwnedUpgradeCandidates(nil, true)
+            local rawCands = AP:GetOwnedUpgradeCandidates(nil, true)
+            local cands = {}
+            for _, it in ipairs(rawCands) do
+                local isMk = (AP.IsMorKelItem and AP:IsMorKelItem(it.itemId)) or (AP.MORKEL_ITEMS and AP.MORKEL_ITEMS[it.itemId])
+                if not isMk then table.insert(cands, it) end
+            end
             DEFAULT_CHAT_FRAME:AddMessage(string.format("|cffffd200[AttuneParser] Ваши вещи для поглощения и ковки: %d|r", #cands))
             local wMap = {
                 petloot = "Сборщик", itembank = "Банк вещей", bank = "Банк",
@@ -4328,7 +4333,7 @@ do
                 DEFAULT_CHAT_FRAME:AddMessage("|cff38bdf8[AttuneParser]|r Активный Дар недели на персонаже не найден.")
             end
             local guildChatStr = (eq.guildKnown == false) and "?" or string.format("+%d%%", eq.guildPct or 0)
-            DEFAULT_CHAT_FRAME:AddMessage(string.format("  Пыль: Мерц=%d, Пыл=%d, Астр=%d (3:1 крафт Астр:+%d, всего титан=%d) | Тит.сунд=%d | Погл. x%.2g (Ги %s) | Эл.погл=%s | Эл.опыта=%s",
+            DEFAULT_CHAT_FRAME:AddMessage(string.format("  Пыль: Мерцающая=%d, Пылающая=%d, Астральная=%d (обмен 3:1: Астральная +%d, всего Титан=%d) | Сундуки=%d | Опыт поглощения x%.2g (Гильдия %s) | Эликсир поглощения=%s | Эликсир опыта=%s",
                 st.dustEpic, st.dustLeg, st.dustTit, st.craftableTit or 0, st.totalTitPotential or 0, st.titanBoxes,
                 eq.xpMult or 1, guildChatStr, g.hasElixir and "ДА" or "нет", g.hasExpElixir and "ДА(x2)" or "нет"))
         elseif msg == "info" or msg == "spec" then
@@ -4336,7 +4341,7 @@ do
             local par = AP:GetParagonInfo()
             local sp = AP:GetPlayerSpecInfo()
             local as = AP:GetAutoSwapSummary()
-            DEFAULT_CHAT_FRAME:AddMessage(string.format("|cff38bdf8[AttuneParser]|r Каталог: %d/%d (%d%%) | Акк=%d, Герой=%d | Парагон ур.%d (%d/%d) | Спек: %s%s | Автосвап: %s (ЧС=%d)",
+            DEFAULT_CHAT_FRAME:AddMessage(string.format("|cff38bdf8[AttuneParser]|r Каталог: %d/%d (%d%%) | Аккаунт=%d, Герой=%d | Доп. уровень %d (%d/%d) | Спек: %s%s | Автопоглощение: %s (ЧС=%d)",
                 cat.doneBase, cat.totalBase, cat.pctBase, cat.acc, cat.hero, par.level, par.curXP, par.maxXP,
                 sp.specName or "?", sp.isCustomLegion and " [Legion]" or "",
                 as.on and "ВКЛ" or (as.on == false and "ВЫКЛ" or "?"), as.blacklistCount or 0))
@@ -4347,7 +4352,7 @@ do
             AP:RequestServerSync(true)
             DEFAULT_CHAT_FRAME:AddMessage("|cff38bdf8[AttuneParser]|r Запрошена синхронизация с сервером.")
         else
-            DEFAULT_CHAT_FRAME:AddMessage("|cff38bdf8[AttuneParser]|r Команды: /ap (окно) | /ap server | /ap valdris | /ap ibauto | /ap ibequip | /ap ibputauto | /ap ibputmode | /ap ibput | /ap ibsplit | /ap ibdebug | /ap ej | /ap auc | bags | info | sync")
+            DEFAULT_CHAT_FRAME:AddMessage("|cff38bdf8[AttuneParser]|r Команды: /ap (окно) | /ap bags (сумки) | /ap sets (сеты T9/T10) | /ap server (события) | /ap info | /ap gift | /ap sync | /ap ej (путеводитель) | /ap auc (аукцион)")
         end
     end
 end
