@@ -2345,6 +2345,146 @@ SUITE_21DE_LUA = r'''
     if AP.serverSync and AP.serverSync.ib then AP.serverSync.ib.items = {} end
     AP.forgeBag = {}
     AP:InvalidateCaches(true)
+
+    -- 21i: Valdris sort modes (default / worst / ilvl_asc / ilvl_desc / qual_desc / stats_asc / stats_desc)
+    -- Every mode yields a distinct permutation across (q2,150,45st,T1), (q3,219,190st,T0), (q4,264,120st,T0), (q4,200,280st,T0)
+    local _oGCS21i, _oGCL21i, _oGII21i = _G.GetContainerNumSlots, _G.GetContainerItemLink, _G.GetItemInfo
+    local _oCAIS21i, _oCAP21i, _oCAAT21i = _G.CustomAttuneItemStatus, _G.CustomAttuneProgress, _G.CustomAttuneAbsorbedTier
+    local _bag21i = {
+        [1] = "item:99503:0:0:0:0:0:0", -- Epic q4, ilvl 264, 120 stats, T0
+        [2] = "item:99502:0:0:0:0:0:0", -- Rare q3, ilvl 219, 190 stats, T0
+        [3] = "item:99504:0:0:0:0:0:0", -- Epic q4, ilvl 200, 280 stats, T0
+        [4] = "item:99501:0:0:0:0:0:0", -- Uncommon q2, ilvl 150, 45 stats, T1
+    }
+    local _meta21i = {
+        [99501] = { name = "Зеленый пояс новичка", q = 2, ilvl = 150, loc = "INVTYPE_WAIST", stats = "5:20,7:25", coreSum = 45, forge = 1 },
+        [99502] = { name = "Синий пояс ветерана", q = 3, ilvl = 219, loc = "INVTYPE_WAIST", stats = "5:90,7:100", coreSum = 190, forge = 0 },
+        [99503] = { name = "Эпический пояс стойкости", q = 4, ilvl = 264, loc = "INVTYPE_WAIST", stats = "5:60,7:60", coreSum = 120, forge = 0 },
+        [99504] = { name = "Эпический пояс мощи", q = 4, ilvl = 200, loc = "INVTYPE_WAIST", stats = "5:140,7:140", coreSum = 280, forge = 0 },
+    }
+    local _oGIS21i = AP.GetItemStats
+    if type(_oGIS21i) ~= "function" then
+        AP.GetItemStats = function(self, eid)
+            local md = _meta21i[tonumber(eid)]
+            if md and md.coreSum then return {}, md.coreSum, 150, 0 end
+            return {}, 0, 0, 0
+        end
+    end
+    AP.Data = AP.Data or {}
+    AP.Data.Items = AP.Data.Items or {}
+    for eid, md in pairs(_meta21i) do
+        AP.Data.Items[eid] = string.format("4|1|6|%d|%d|80|150|1|0|0|-1|0|%s|%s", md.q, md.ilvl, md.stats, md.name)
+        if AP._mem and AP._mem.itemMetaCache then AP._mem.itemMetaCache[eid] = nil end
+    end
+    _G.GetContainerNumSlots = function(b) return b == 0 and 6 or 0 end
+    _G.GetContainerItemLink = function(b, s) return b == 0 and _bag21i[s] or nil end
+    _G.GetItemInfo = function(arg)
+        local eid = tonumber(tostring(arg):match("item:(%d+)")) or tonumber(arg)
+        local md = eid and _meta21i[eid]
+        if md then
+            return md.name, "|cffa335ee|Hitem:" .. eid .. ":0:0:0:0:0:0:0:80|h[" .. md.name .. "]|h|r",
+                md.q, md.ilvl, 80, "Доспехи", "Латы", 1, md.loc, "Interface\\Icons\\INV_Belt_01", 1000
+        end
+        if _oGII21i then return _oGII21i(arg) end
+        return nil
+    end
+    _G.CustomAttuneItemStatus = function(eid, forge, sfx)
+        local md = _meta21i[eid]
+        if md then
+            local f = tonumber(forge) or 0
+            return (f <= (md.forge or 0)), false, 100, true
+        end
+        if _oCAIS21i then return _oCAIS21i(eid, forge, sfx) end
+        return false, false, 0, true
+    end
+    _G.CustomAttuneAbsorbedTier = function(eid)
+        if _meta21i[eid] then return _meta21i[eid].forge or 0 end
+        if _oCAAT21i then return _oCAAT21i(eid) end
+        return -1
+    end
+    _G.CustomAttuneProgress = function(eid)
+        if _meta21i[eid] then return 0, nil, 0, 0 end
+        if _oCAP21i then return _oCAP21i(eid) end
+        return nil
+    end
+    AP.forgeBag = { [0] = { [1] = 0, [2] = 0, [3] = 0, [4] = 1 } }
+    if AP.serverSync and AP.serverSync.valdris then
+        AP.serverSync.valdris.skip = {}
+        AP.serverSync.valdris.blockedByTier = {}
+    end
+    AP:InvalidateCaches(true)
+
+    local function OrderStr(list)
+        local t = {}
+        for i = 1, #list do t[#t + 1] = tostring(list[i].eid) end
+        return table.concat(t, ",")
+    end
+
+    local expectedOrders = {
+        default    = "99503,99502,99504,99501",
+        worst      = "99501,99502,99504,99503",
+        ilvl_asc   = "99501,99504,99502,99503",
+        ilvl_desc  = "99503,99502,99504,99501",
+        qual_desc  = "99503,99504,99502,99501",
+        stats_asc  = "99501,99503,99502,99504",
+        stats_desc = "99504,99502,99503,99501",
+    }
+    for mode, wantOrder in pairs(expectedOrders) do
+        AP:SetValdrisSort(mode)
+        local cands = AP:GetValdrisCandidates(3)
+        local pItems = AP:GetValdrisPickerItems("bags", "")
+        assert(OrderStr(cands) == wantOrder,
+            "21i GetValdrisCandidates order mismatch for '" .. mode .. "': want=" .. wantOrder .. " got=" .. OrderStr(cands))
+        assert(OrderStr(pItems) == wantOrder,
+            "21i GetValdrisPickerItems order mismatch for '" .. mode .. "': want=" .. wantOrder .. " got=" .. OrderStr(pItems))
+    end
+
+    -- Test Valdris bar + picker sort UI interaction & menu synchronization
+    local ipf21i = _G.ItemProgressFrame or CreateFrame("Frame", "ItemProgressFrame")
+    ipf21i:Show()
+    AP:SetSetting("showValdrisBar", true)
+    _G._FireEvent("CHAT_MSG_ADDON", "ASMSG_IPROG_OPEN", "1", "WHISPER", "TestHero")
+    local vb21i = _G.AP_ValdrisAutoBar
+    assert(vb21i and vb21i.sortBtn and vb21i.pickBtn, "21i AP_ValdrisAutoBar must expose sortBtn!")
+    vb21i.pickBtn._scripts.OnClick(vb21i.pickBtn, "LeftButton")
+    local pf21i = _G.AP_ValdrisPickerFrame
+    assert(pf21i and pf21i:IsShown() and pf21i.sortBtn, "21i AP_ValdrisPickerFrame must expose sortBtn!")
+
+    -- Open dropdown menu from bar sortBtn, choose "worst" (row 2), verify both UIs and next auto-upgrade candidate switch to 99501!
+    vb21i.sortBtn._scripts.OnClick(vb21i.sortBtn, "LeftButton")
+    local sm21i = _G.AP_ValdrisSortMenu
+    assert(sm21i and sm21i:IsShown() and sm21i.rows and sm21i.rows[2], "21i LKM on sortBtn must open AP_ValdrisSortMenu!")
+    sm21i.rows[2]._scripts.OnClick(sm21i.rows[2], "LeftButton")
+    assert(not sm21i:IsShown() and AP:GetValdrisSort() == "worst", "21i Selecting menu row 2 must activate 'worst' sort and close menu!")
+    assert(pf21i.rows[1].itemData and pf21i.rows[1].itemData.eid == 99501,
+        "21i Picker row 1 must update immediately to cheapest green item 99501! got=" .. tostring(pf21i.rows[1].itemData and pf21i.rows[1].itemData.eid))
+    assert(pf21i.rows[1].subFs:GetText():find("45 ст.", 1, true), "21i Picker row subFs must display item core stats ('45 ст.')!")
+    assert(AP:GetValdrisUpgradeSummary().nextCand.eid == 99501, "21i Auto-upgrade queue nextCand must prioritize 99501 under 'worst'!")
+    assert(vb21i.sortBtn.label:GetText():find("Худш", 1, true) and pf21i.sortBtn.label:GetText():find("Худш", 1, true),
+        "21i Both bar and picker sortBtn labels must sync to 'Худш'!")
+
+    -- PKM on picker sortBtn cycles to next mode (ilvl_asc)
+    pf21i.sortBtn._scripts.OnClick(pf21i.sortBtn, "RightButton")
+    assert(AP:GetValdrisSort() == "ilvl_asc" and pf21i.rows[2].itemData.eid == 99504,
+        "21i PKM on sortBtn must cycle to 'ilvl_asc'!")
+
+    -- Slash command /ap forge sort stats_desc switches sort & auto-upgrade queue to highest stats (99504)
+    SlashCmdList["ATTUNEPARSER"]("forge sort stats_desc")
+    assert(AP:GetValdrisSort() == "stats_desc" and AP:GetValdrisUpgradeSummary().nextCand.eid == 99504,
+        "21i /ap forge sort stats_desc must prioritize highest-stat item 99504!")
+
+    -- Restore clean 21i state
+    pf21i:Hide()
+    AP:SetValdrisSort("default")
+    AP.GetItemStats = _oGIS21i
+    for eid in pairs(_meta21i) do
+        AP.Data.Items[eid] = nil
+        if AP._mem and AP._mem.itemMetaCache then AP._mem.itemMetaCache[eid] = nil end
+    end
+    _G.GetContainerNumSlots, _G.GetContainerItemLink, _G.GetItemInfo = _oGCS21i, _oGCL21i, _oGII21i
+    _G.CustomAttuneItemStatus, _G.CustomAttuneProgress, _G.CustomAttuneAbsorbedTier = _oCAIS21i, _oCAP21i, _oCAAT21i
+    AP.forgeBag = {}
+    AP:InvalidateCaches(true)
     return "SUITE_21DE_PASSED"
 '''
 

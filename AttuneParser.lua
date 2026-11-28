@@ -9,7 +9,7 @@
 local AP = _G.AttuneParser or {}
 _G.AttuneParser = AP
 
-AP.VERSION = "1.3.1"
+AP.VERSION = "1.3.2"
 AP.Data = AP.Data or {}
 
 -- User-confirmed server tier defaults (replaced live when ASMSG_ATTUNE_TIERS arrives)
@@ -400,6 +400,7 @@ do
             ibAutoPutMode = "unabsorbed",
             ibPutKeepSets = true,
             valdrisMaxTier = 3,
+            valdrisSort = "default",
             valdrisAutoOpen = false,
             valdrisIncludeEquipped = false,
             valdrisIncludeBank = true,

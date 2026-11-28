@@ -3143,13 +3143,21 @@ do
                         end
                     end
                     return
+                elseif (subCmd == "sort" or subCmd:sub(1, 5) == "sort ") and type(AP.SetValdrisSort) == "function" then
+                    local arg = subCmd:match("^sort%s+(.+)$")
+                    local nm = arg and AP:SetValdrisSort(arg) or AP:CycleValdrisSort(1)
+                    if DEFAULT_CHAT_FRAME then
+                        local def = type(AP.GetValdrisSortInfo) == "function" and AP:GetValdrisSortInfo(nm) or nil
+                        DEFAULT_CHAT_FRAME:AddMessage("|cff38bdf8[AttuneParser]|r Сортировка ковки: |cff40ff40" .. tostring(def and def.menuLabel or nm) .. "|r")
+                    end
+                    return
                 elseif subCmd == "" and type(AP.GetValdrisUpgradeSummary) == "function" then
                     local vs = AP:GetValdrisUpgradeSummary(true)
                     if DEFAULT_CHAT_FRAME then
                         DEFAULT_CHAT_FRAME:AddMessage(string.format(
-                            "|cff38bdf8[AttuneParser]|r Авто-улучшение ковки: окно=%s | готово=%d | цель<=%d | авто=%s | Банк вещей=%s | надетые=%s | /ap forge go | stop | bank | eq",
+                            "|cff38bdf8[AttuneParser]|r Авто-улучшение ковки: окно=%s | готово=%d | цель<=%d | сорт=%s | авто=%s | Банк вещей=%s | надетые=%s | /ap forge go | stop | bank | eq | sort",
                             vs.windowOpen and "|cff40ff40откр.|r" or "|cffff6060закр.|r",
-                            vs.eligibleCount or 0, vs.maxTier or 3, vs.autoOpen and "ВКЛ" or "ВЫКЛ", vs.includeBank and "ВКЛ" or "ВЫКЛ", vs.includeEquipped and "ВКЛ" or "ВЫКЛ"
+                            vs.eligibleCount or 0, vs.maxTier or 3, tostring(vs.sortMode or "default"), vs.autoOpen and "ВКЛ" or "ВЫКЛ", vs.includeBank and "ВКЛ" or "ВЫКЛ", vs.includeEquipped and "ВКЛ" or "ВЫКЛ"
                         ))
                     end
                     return
@@ -5798,7 +5806,7 @@ do
     local vp = SS.valdris
     local vpDrv = CreateFrame("Frame")
     vpDrv:Hide()
-    local vpBar, vpPicker = nil, nil
+    local vpBar, vpPicker, vpSortMenu = nil, nil, nil
 
     local DEFAULT_PICK_ICON = "Interface\\Icons\\INV_Hammer_20"
     local TIER_SHORT = {
@@ -6162,6 +6170,151 @@ do
         return val
     end
 
+    local VALDRIS_SORT_MODES = {
+        {
+            key = "default",
+            btnLabel = "Сорт: По умолч.",
+            menuLabel = "По умолчанию (тир -> макс. ilvl)",
+            desc = "Сначала меньший тир ковки (0 -> 1 -> 2), внутри тира выше ilvl.",
+            spec = { { "forge", true }, { "ilvl", false }, { "qual", false }, { "coreStats", false } },
+        },
+        {
+            key = "worst",
+            btnLabel = "Сорт: Худш -> Лучш",
+            menuLabel = "Худшие сначала (зел -> синь -> мал. ilvl)",
+            desc = "От худшего к лучшему: зелёнка -> синька -> эпик, ниже ilvl и меньше статов. Дешевле ковка и быстрее чистит сумки.",
+            spec = { { "qual", true }, { "ilvl", true }, { "coreStats", true }, { "forge", true } },
+        },
+        {
+            key = "ilvl_asc",
+            btnLabel = "Сорт: ilvl мин ->+",
+            menuLabel = "По ilvl: меньше -> больше",
+            desc = "Сначала предметы с самым низким уровнем (ilvl), затем выше.",
+            spec = { { "ilvl", true }, { "qual", true }, { "coreStats", true }, { "forge", true } },
+        },
+        {
+            key = "ilvl_desc",
+            btnLabel = "Сорт: ilvl макс ->-",
+            menuLabel = "По ilvl: больше -> меньше",
+            desc = "Сначала предметы с самым высоким уровнем (ilvl), затем ниже.",
+            spec = { { "ilvl", false }, { "qual", false }, { "coreStats", false }, { "forge", true } },
+        },
+        {
+            key = "qual_desc",
+            btnLabel = "Сорт: Кач. макс ->-",
+            menuLabel = "По качеству: эпик/легенд -> зелен",
+            desc = "Сначала легендарные и эпические, затем редкие и необычные (зелёные).",
+            spec = { { "qual", false }, { "ilvl", false }, { "coreStats", false }, { "forge", true } },
+        },
+        {
+            key = "stats_asc",
+            btnLabel = "Сорт: Статы мин ->+",
+            menuLabel = "По статам: меньше -> больше",
+            desc = "Сначала предметы с наименьшей суммой базовых характеристик.",
+            spec = { { "coreStats", true }, { "ilvl", true }, { "qual", true }, { "forge", true } },
+        },
+        {
+            key = "stats_desc",
+            btnLabel = "Сорт: Статы макс ->-",
+            menuLabel = "По статам: больше -> меньше",
+            desc = "Сначала предметы с наибольшей суммой базовых характеристик.",
+            spec = { { "coreStats", false }, { "ilvl", false }, { "qual", false }, { "forge", true } },
+        },
+    }
+    local VALDRIS_SORT_MAP = {}
+    for idx, sm in ipairs(VALDRIS_SORT_MODES) do
+        sm.index = idx
+        VALDRIS_SORT_MAP[sm.key] = sm
+    end
+    local VALDRIS_SORT_ALIASES = {
+        def = "default",
+        tier = "default",
+        bad = "worst",
+        cheap = "worst",
+        qual_asc = "worst",
+        ["qual+"] = "worst",
+        ["qual-"] = "qual_desc",
+        ["ilvl+"] = "ilvl_asc",
+        ["ilvl-"] = "ilvl_desc",
+        ["stats+"] = "stats_asc",
+        ["stats-"] = "stats_desc",
+    }
+
+    local function NormalizeValdrisSortMode(mode)
+        if type(mode) ~= "string" then return "default" end
+        local low = mode:lower():gsub("^%s+", ""):gsub("%s+$", "")
+        if VALDRIS_SORT_MAP[low] then return low end
+        return VALDRIS_SORT_ALIASES[low] or "default"
+    end
+
+    local function GetValdrisSortDef(mode)
+        return VALDRIS_SORT_MAP[NormalizeValdrisSortMode(mode)] or VALDRIS_SORT_MODES[1]
+    end
+
+    local function ResolveValdrisSortMeta(eid, sfx, link, qHint, ilvlHint)
+        local q = tonumber(qHint)
+        local il = tonumber(ilvlHint)
+        local rec = (eid and type(AP.ParseItemRecord) == "function") and AP.ParseItemRecord(eid) or nil
+        if (not q or q <= 0) and rec and (rec.quality or 0) > 0 then
+            q = rec.quality
+        end
+        if (not il or il <= 0) and rec and (rec.ilvl or 0) > 0 then
+            il = rec.ilvl
+        end
+        local coreSum = 0
+        if eid and type(AP.GetItemStats) == "function" then
+            local arg = (sfx and sfx ~= 0 and link) and link or (sfx or 0)
+            local _, cs = AP:GetItemStats(eid, arg)
+            coreSum = tonumber(cs) or 0
+        elseif rec and rec.coreSum then
+            coreSum = tonumber(rec.coreSum) or 0
+        end
+        return q or 0, il or 0, coreSum
+    end
+
+    local function CompareValdrisItems(a, b, mode)
+        local spec = GetValdrisSortDef(mode).spec
+        for i = 1, #spec do
+            local k, asc = spec[i][1], spec[i][2]
+            local va = tonumber(a[k]) or 0
+            local vb = tonumber(b[k]) or 0
+            if va ~= vb then
+                if asc then return va < vb end
+                return va > vb
+            end
+        end
+        return nil
+    end
+
+    function AP:GetValdrisSort()
+        return NormalizeValdrisSortMode(AP:GetSetting("valdrisSort"))
+    end
+
+    function AP:GetValdrisSortInfo(mode)
+        return GetValdrisSortDef(mode or AP:GetValdrisSort())
+    end
+
+    function AP:GetValdrisSortModes()
+        return VALDRIS_SORT_MODES
+    end
+
+    function AP:SetValdrisSort(mode)
+        local key = NormalizeValdrisSortMode(mode)
+        AP:SetSetting("valdrisSort", key)
+        if vpPicker then vpPicker.offset = 0 end
+        if RefreshValdrisBar then RefreshValdrisBar() end
+        if RefreshValdrisPicker then RefreshValdrisPicker() end
+        AP:Fire("SERVER_SYNC_UPDATED", "VALDRIS_SORT")
+        return key
+    end
+
+    function AP:CycleValdrisSort(step)
+        local cur = GetValdrisSortDef(AP:GetValdrisSort())
+        local n = #VALDRIS_SORT_MODES
+        local idx = ((cur.index or 1) - 1 + (tonumber(step) or 1)) % n + 1
+        return AP:SetValdrisSort(VALDRIS_SORT_MODES[idx].key)
+    end
+
     local function EvalItemForValdris(eid, sfx, bagForge, wantMax, link, equipLoc, bag, slot, invSlot)
         if not eid or eid <= 0 or (eid >= 1702000 and eid <= 1702999) then
             return false, "no_rule"
@@ -6201,7 +6354,8 @@ do
         return true, "ready"
     end
 
-    local function MakeBagCand(bag, slot, invSlot, link, eid, sfx, bagForge, ilvl, name, ibGuid)
+    local function MakeBagCand(bag, slot, invSlot, link, eid, sfx, bagForge, qHint, ilvlHint, name, ibGuid)
+        local qual, ilvl, coreStats = ResolveValdrisSortMeta(eid, sfx, link, qHint, ilvlHint)
         return {
             bag = bag,
             slot = slot,
@@ -6214,7 +6368,9 @@ do
             entry = eid,
             sfx = sfx,
             forge = bagForge,
-            ilvl = tonumber(ilvl) or 0,
+            qual = qual,
+            ilvl = ilvl,
+            coreStats = coreStats,
             name = name or ("#" .. eid),
             key = ibGuid and ("ib:" .. ibGuid .. ":" .. bagForge)
                   or (invSlot and ("eq:" .. invSlot .. ":" .. link .. ":" .. bagForge)
@@ -6247,9 +6403,10 @@ do
         return seenWarm, true
     end
 
-    function AP:GetValdrisCandidates(maxTierOverride)
+    function AP:GetValdrisCandidates(maxTierOverride, sortModeOverride)
         local wantMax = maxTierOverride and math_floor(tonumber(maxTierOverride) or 3) or AP:GetValdrisMaxTier()
         if wantMax < 1 then wantMax = 1 elseif wantMax > 3 then wantMax = 3 end
+        local sortMode = sortModeOverride and NormalizeValdrisSortMode(sortModeOverride) or AP:GetValdrisSort()
         local incEq = (AP:GetSetting("valdrisIncludeEquipped") == true)
         local incBank = (AP:GetSetting("valdrisIncludeBank") ~= false)
         local slotLocs = SS._ibSlotLocs or {}
@@ -6286,7 +6443,7 @@ do
                                     local sfx = AP.ExtractSuffix and AP.ExtractSuffix(link) or 0
                                     if EvalItemForValdris(eid, sfx, bagForge, wantMax, link, equipLoc, bag, slot, nil) then
                                         totalEligible = totalEligible + 1
-                                        local cand = MakeBagCand(bag, slot, nil, link, eid, sfx, bagForge, ilvl, name, nil)
+                                        local cand = MakeBagCand(bag, slot, nil, link, eid, sfx, bagForge, q, ilvl, name, nil)
                                         if not vp.skip[cand.key] and not vp.blockedByTier[bagForge + 1] then
                                             out[#out + 1] = cand
                                         end
@@ -6323,7 +6480,7 @@ do
                                 local sfx = tonumber(it.suffix) or (AP.ExtractSuffix and AP.ExtractSuffix(lk)) or 0
                                 if EvalItemForValdris(eid, sfx, fTier, wantMax, lk, equipLoc, nil, nil, nil) then
                                     totalEligible = totalEligible + 1
-                                    local cand = MakeBagCand(nil, nil, nil, lk, eid, sfx, fTier, ilvl, name, it.guid)
+                                    local cand = MakeBagCand(nil, nil, nil, lk, eid, sfx, fTier, q, ilvl, name, it.guid)
                                     if not vp.skip[cand.key] and not vp.blockedByTier[fTier + 1] and not vp.bankSpaceFull then
                                         out[#out + 1] = cand
                                     end
@@ -6354,7 +6511,7 @@ do
                                 local sfx = AP.ExtractSuffix and AP.ExtractSuffix(link) or 0
                                 if EvalItemForValdris(eid, sfx, eqForge, wantMax, link, equipLoc, nil, nil, eqDef.id) then
                                     totalEligible = totalEligible + 1
-                                    local cand = MakeBagCand(nil, nil, eqDef.id, link, eid, sfx, eqForge, ilvl, name, nil)
+                                    local cand = MakeBagCand(nil, nil, eqDef.id, link, eid, sfx, eqForge, q, ilvl, name, nil)
                                     if not vp.skip[cand.key] and not vp.blockedByTier[eqForge + 1] then
                                         out[#out + 1] = cand
                                     end
@@ -6370,8 +6527,8 @@ do
             local sa = a.isBank and 2 or (a.isEquipped and 3 or 1)
             local sb = b.isBank and 2 or (b.isEquipped and 3 or 1)
             if sa ~= sb then return sa < sb end
-            if a.forge ~= b.forge then return a.forge < b.forge end
-            if a.ilvl ~= b.ilvl then return a.ilvl > b.ilvl end
+            local cr = CompareValdrisItems(a, b, sortMode)
+            if cr ~= nil then return cr end
             if (a.bag or 99) ~= (b.bag or 99) then return (a.bag or 99) < (b.bag or 99) end
             return (a.slot or a.invSlot or a.ibGuid or 0) < (b.slot or b.invSlot or b.ibGuid or 0)
         end)
@@ -6379,8 +6536,9 @@ do
         return out, totalEligible, needsWarm
     end
 
-    function AP:GetValdrisPickerItems(filterKind, searchText)
+    function AP:GetValdrisPickerItems(filterKind, searchText, sortModeOverride)
         filterKind = filterKind or "all"
+        local sortMode = sortModeOverride and NormalizeValdrisSortMode(sortModeOverride) or AP:GetValdrisSort()
         local qStr = (type(searchText) == "string" and searchText ~= "") and AP.Norm(searchText) or nil
         local wantMax = AP:GetValdrisMaxTier()
         local isDisp = IsValdrisDispTabOpen()
@@ -6468,6 +6626,7 @@ do
                     end
                 end
             end
+            local mQual, mIlvl, mCore = ResolveValdrisSortMeta(eid, sfx, fullLink or link, qual, ilvl)
             items[#items + 1] = {
                 bag = bag,
                 slot = slot,
@@ -6480,8 +6639,9 @@ do
                 eid = eid,
                 sfx = sfx,
                 forge = forge,
-                qual = tonumber(qual) or (isBank and 4 or 1),
-                ilvl = tonumber(ilvl) or 0,
+                qual = (mQual and mQual > 0 and mQual) or (isBank and 4 or 1),
+                ilvl = mIlvl or 0,
+                coreStats = mCore or 0,
                 name = dName,
                 tex = tex or DEFAULT_PICK_ICON,
                 statusTag = statusTag,
@@ -6535,9 +6695,10 @@ do
             if a.statusOrder ~= b.statusOrder then return a.statusOrder < b.statusOrder end
             local ka = a.isEquipped and 1 or (a.isBank and 3 or 2)
             local kb = b.isEquipped and 1 or (b.isBank and 3 or 2)
+            if sortMode == "default" and ka ~= kb then return ka < kb end
+            local cr = CompareValdrisItems(a, b, sortMode)
+            if cr ~= nil then return cr end
             if ka ~= kb then return ka < kb end
-            if a.forge ~= b.forge then return a.forge < b.forge end
-            if a.ilvl ~= b.ilvl then return a.ilvl > b.ilvl end
             return tostring(a.name) < tostring(b.name)
         end)
         if warmBank > 0 and AP.After and SS.valdrisRefreshPicker then
@@ -6988,6 +7149,7 @@ do
             running = vp.running == true,
             windowOpen = IsValdrisFrameOpen(),
             maxTier = AP:GetValdrisMaxTier(),
+            sortMode = AP:GetValdrisSort(),
             autoOpen = (AP:GetSetting("valdrisAutoOpen") == true),
             includeEquipped = (AP:GetSetting("valdrisIncludeEquipped") == true),
             includeBank = (AP:GetSetting("valdrisIncludeBank") ~= false),
@@ -7001,12 +7163,23 @@ do
         }
     end
 
+    local function RefreshValdrisSortButton(btn)
+        if not (btn and btn.label) then return end
+        local def = GetValdrisSortDef(AP:GetValdrisSort())
+        if def.key ~= "default" then
+            btn.label:SetText("|cff40ff40" .. def.btnLabel .. "|r")
+        else
+            btn.label:SetText(def.btnLabel)
+        end
+    end
+
     RefreshValdrisBar = function()
         if not vpBar then return end
         local open = IsValdrisFrameOpen()
         if not open or AP:GetSetting("showValdrisBar") == false then
             vpBar:Hide()
             if vpPicker then vpPicker:Hide() end
+            if vpSortMenu then vpSortMenu:Hide() end
             return
         end
         vp.lastBarUiAt = GetTime()
@@ -7022,7 +7195,7 @@ do
                 local lpForge = ResolveBagForge(lp.bag, lp.slot, lpEid)
                 if vpBar.pickBtn.icon then vpBar.pickBtn.icon:SetTexture(lp.tex or DEFAULT_PICK_ICON) end
                 ApplyForgeIconVisual(vpBar.pickBtn.iconBox, vpBar.pickBtn.forgeBadge, nil, lpForge, lp.q, false)
-                if vpBar.pickBtn.label then vpBar.pickBtn.label:SetText(CropText(lp.name or "Выбрано", 17)) end
+                if vpBar.pickBtn.label then vpBar.pickBtn.label:SetText(CropText(lp.name or "Выбрано", 15)) end
             else
                 if vpBar.pickBtn.icon then vpBar.pickBtn.icon:SetTexture(DEFAULT_PICK_ICON) end
                 ApplyForgeIconVisual(vpBar.pickBtn.iconBox, vpBar.pickBtn.forgeBadge, nil, 0, nil, false)
@@ -7032,6 +7205,8 @@ do
         if vpBar.tierBtn and vpBar.tierBtn.label then
             vpBar.tierBtn.label:SetText("Цель: " .. (TIER_SHORT[maxT] or tostring(maxT)))
         end
+        RefreshValdrisSortButton(vpBar.sortBtn)
+        if vpSortMenu and vpSortMenu:IsShown() and vpSortMenu.UpdateActive then vpSortMenu.UpdateActive() end
         if vpBar.incBkChk then
             local bkOn = (AP:GetSetting("valdrisIncludeBank") ~= false)
             vpBar.incBkChk._mk:SetText(bkOn and "|cff40ff40V|r" or "")
@@ -7588,6 +7763,121 @@ do
         end
     end
 
+    local function RefreshValdrisSortMenu()
+        if not vpSortMenu then return end
+        local curKey = AP:GetValdrisSort()
+        for _, r in ipairs(vpSortMenu.rows or {}) do
+            local active = (r.sortKey == curKey)
+            PS.PaintBtn(r, active and "green" or "dark")
+            if r.label then
+                r.label:SetText((active and "|cff40ff40[V]|r " or "    ") .. (r.sortDef and r.sortDef.menuLabel or ""))
+            end
+        end
+    end
+
+    local function EnsureValdrisSortMenu(ownerParent)
+        if vpSortMenu then return vpSortMenu end
+        local menuHost = rawget(_G, "ItemProgressFrame") or rawget(_G, "UIParent") or ownerParent
+        local m = CreateFrame("Frame", "AP_ValdrisSortMenu", menuHost)
+        local rowH = 22
+        m:SetSize(272, #VALDRIS_SORT_MODES * rowH + 30)
+        m:SetFrameStrata("FULLSCREEN_DIALOG")
+        m:SetFrameLevel(150)
+        m:EnableMouse(true)
+        m:SetClampedToScreen(true)
+        m:Hide()
+        PS.StyleBox(m, 0.97, true)
+
+        local hdr = m:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        hdr:SetPoint("TOPLEFT", 8, -7)
+        hdr:SetText("|cffffd200Порядок ковки и списка|r")
+
+        local xBtn = CreateFrame("Button", nil, m)
+        xBtn:SetPoint("TOPRIGHT", -5, -5)
+        PS.StyleClose(xBtn, 16)
+        xBtn:SetScript("OnClick", function() m:Hide() end)
+
+        m.rows = {}
+        for i, sm in ipairs(VALDRIS_SORT_MODES) do
+            local rb = PS.MakeBtn(m, 256, 20, sm.menuLabel, "dark")
+            rb:SetPoint("TOPLEFT", m, "TOPLEFT", 8, -(24 + (i - 1) * rowH))
+            if rb.label then
+                rb.label:ClearAllPoints()
+                rb.label:SetPoint("LEFT", rb, "LEFT", 6, 0)
+                rb.label:SetPoint("RIGHT", rb, "RIGHT", -6, 0)
+                rb.label:SetJustifyH("LEFT")
+                if rb.label.SetWordWrap then rb.label:SetWordWrap(false) end
+            end
+            rb.sortKey = sm.key
+            rb.sortDef = sm
+            rb:SetScript("OnClick", function(self)
+                AP:SetValdrisSort(self.sortKey)
+                m:Hide()
+            end)
+            rb:SetScript("OnEnter", function(self)
+                GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+                GameTooltip:SetText("|cffffd200" .. self.sortDef.menuLabel .. "|r")
+                GameTooltip:AddLine(self.sortDef.desc, 0.9, 0.9, 0.9, true)
+                GameTooltip:Show()
+            end)
+            rb:SetScript("OnLeave", function() GameTooltip:Hide() end)
+            m.rows[#m.rows + 1] = rb
+        end
+        m:SetScript("OnHide", function()
+            if GameTooltip and GameTooltip.Hide then GameTooltip:Hide() end
+        end)
+
+        vpSortMenu = m
+        m.UpdateActive = RefreshValdrisSortMenu
+        RefreshValdrisSortMenu()
+        return m
+    end
+
+    local function ToggleValdrisSortMenu(anchorBtn)
+        local m = EnsureValdrisSortMenu(anchorBtn)
+        if m:IsShown() and m.anchorBtn == anchorBtn then
+            m:Hide()
+            return
+        end
+        RefreshValdrisSortMenu()
+        m.anchorBtn = anchorBtn
+        m:ClearAllPoints()
+        m:SetPoint("TOPLEFT", anchorBtn, "BOTTOMLEFT", 0, -3)
+        m:Show()
+    end
+
+    local function CreateValdrisSortButton(parent, width, height, ttAnchor)
+        local btn = PS.MakeBtn(parent, width, height or 20, "Сорт: По умолч.", "dark")
+        btn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+        if btn.label then
+            btn.label:ClearAllPoints()
+            btn.label:SetPoint("LEFT", btn, "LEFT", 5, 0)
+            btn.label:SetPoint("RIGHT", btn, "RIGHT", -5, 0)
+            btn.label:SetJustifyH("CENTER")
+            if btn.label.SetWordWrap then btn.label:SetWordWrap(false) end
+        end
+        RefreshValdrisSortButton(btn)
+        btn:SetScript("OnClick", function(self, mBtn)
+            if mBtn == "RightButton" then
+                AP:CycleValdrisSort(1)
+                if vpSortMenu and vpSortMenu:IsShown() then RefreshValdrisSortMenu() end
+            else
+                ToggleValdrisSortMenu(self)
+            end
+        end)
+        btn:SetScript("OnEnter", function(self)
+            local def = GetValdrisSortDef(AP:GetValdrisSort())
+            GameTooltip:SetOwner(self, ttAnchor or "ANCHOR_TOP")
+            GameTooltip:SetText("|cffffd200Сортировка ковки у Вальдриса|r")
+            GameTooltip:AddLine("Сейчас: |cff40ff40" .. def.menuLabel .. "|r", 0.9, 0.9, 0.9, true)
+            GameTooltip:AddLine(def.desc, 0.85, 0.9, 1.0, true)
+            GameTooltip:AddLine("ЛКМ: выбрать режим сортировки | ПКМ: переключить дальше.", 0.4, 1.0, 0.4, true)
+            GameTooltip:Show()
+        end)
+        btn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+        return btn
+    end
+
     local function EnsureValdrisPicker(ipf, anchorBtn)
         if vpPicker then return vpPicker end
         local pf = CreateFrame("Frame", "AP_ValdrisPickerFrame", ipf)
@@ -7608,6 +7898,15 @@ do
         closeBtn:SetPoint("TOPRIGHT", -6, -6)
         PS.StyleClose(closeBtn, 20)
         closeBtn:SetScript("OnClick", function() pf:Hide() end)
+
+        local pSortBtn = CreateValdrisSortButton(pf, 148, 18, "ANCHOR_TOP")
+        pSortBtn:SetPoint("RIGHT", closeBtn, "LEFT", -6, 0)
+        pf.sortBtn = pSortBtn
+        pf:SetScript("OnHide", function()
+            if vpSortMenu and vpSortMenu:IsShown() and vpSortMenu.anchorBtn == pSortBtn then
+                vpSortMenu:Hide()
+            end
+        end)
 
         pf.filterKind = "all"
         pf.offset = 0
@@ -7830,12 +8129,13 @@ do
                     r.nameFs:SetText(CropText(d.name, 42))
                     r.nameFs:SetTextColor(qr, qg, qb)
                     local forgeLbl = fv and string.format("  |c%s[%s]|r", fv.hex, fv.name) or ""
+                    local statStr = (d.coreStats and d.coreStats > 0) and ("  |cff98c8ff" .. d.coreStats .. " ст.|r") or ""
                     if d.isEquipped then
-                        r.subFs:SetText("|cffffd200[Надето: " .. tostring(d.slotLabel) .. "]|r  ilvl " .. (d.ilvl or 0) .. forgeLbl)
+                        r.subFs:SetText("|cffffd200[Надето: " .. tostring(d.slotLabel) .. "]|r  ilvl " .. (d.ilvl or 0) .. statStr .. forgeLbl)
                     elseif d.isBank then
-                        r.subFs:SetText("|cffa78bfa[Банк вещей]|r  ilvl " .. (d.ilvl or 0) .. forgeLbl)
+                        r.subFs:SetText("|cffa78bfa[Банк вещей]|r  ilvl " .. (d.ilvl or 0) .. statStr .. forgeLbl)
                     else
-                        r.subFs:SetText("|cff38bdf8[Сумка " .. d.bag .. ":" .. d.slot .. "]|r  ilvl " .. (d.ilvl or 0) .. forgeLbl)
+                        r.subFs:SetText("|cff38bdf8[Сумка " .. d.bag .. ":" .. d.slot .. "]|r  ilvl " .. (d.ilvl or 0) .. statStr .. forgeLbl)
                     end
                     r.statusFs:SetText(d.statusTag or "")
                     r:Show()
@@ -7853,6 +8153,8 @@ do
             for _, b in ipairs(vpPicker.filterBtns or {}) do
                 PS.PaintBtn(b, b.key == vpPicker.filterKind and "green" or "dark")
             end
+            RefreshValdrisSortButton(vpPicker.sortBtn)
+            if vpSortMenu and vpSortMenu:IsShown() then RefreshValdrisSortMenu() end
             local txt = vpPicker.searchBox and vpPicker.searchBox:GetText() or ""
             local data = AP:GetValdrisPickerItems(vpPicker.filterKind, txt)
             vpPicker.listData = data
@@ -7882,8 +8184,8 @@ do
         f:SetFrameLevel((ipf.GetFrameLevel and ipf:GetFrameLevel() or 1) + 12)
         PS.StyleBox(f, 0.90, true)
 
-        local pickBtn = PS.MakeBtn(f, 152, 20, "", "dark")
-        pickBtn:SetPoint("LEFT", f, "LEFT", 6, 0)
+        local pickBtn = PS.MakeBtn(f, 138, 20, "", "dark")
+        pickBtn:SetPoint("LEFT", f, "LEFT", 5, 0)
         pickBtn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
         local pBox = CreateFrame("Frame", nil, pickBtn)
         pBox:SetSize(18, 18)
@@ -7907,7 +8209,7 @@ do
         if pickBtn.label then
             pickBtn.label:ClearAllPoints()
             pickBtn.label:SetPoint("LEFT", pBox, "RIGHT", 5, 0)
-            pickBtn.label:SetPoint("RIGHT", pickBtn, "RIGHT", -6, 0)
+            pickBtn.label:SetPoint("RIGHT", pickBtn, "RIGHT", -5, 0)
             pickBtn.label:SetJustifyH("LEFT")
             if pickBtn.label.SetWordWrap then pickBtn.label:SetWordWrap(false) end
             pickBtn.label:SetText("Выбрать вещь")
@@ -7939,8 +8241,8 @@ do
         pickBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
         f.pickBtn = pickBtn
 
-        local goBtn = PS.MakeBtn(f, 100, 20, "Улучшать (0)", "dark")
-        goBtn:SetPoint("LEFT", pickBtn, "RIGHT", 4, 0)
+        local goBtn = PS.MakeBtn(f, 92, 20, "Улучшать (0)", "dark")
+        goBtn:SetPoint("LEFT", pickBtn, "RIGHT", 3, 0)
         goBtn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
         goBtn:SetScript("OnClick", function(_, mBtn)
             if vp.running then
@@ -7952,8 +8254,8 @@ do
                 vp.bankSpaceFull = false
                 local sum = AP:GetValdrisUpgradeSummary(false)
                 if DEFAULT_CHAT_FRAME then
-                    DEFAULT_CHAT_FRAME:AddMessage(string.format("|cff38bdf8[Прогрессия]|r Найдено к улучшению: %d (цель<=%d, Банк вещей=%s, надетые=%s).",
-                        sum.totalEligible or 0, sum.maxTier or 3, sum.includeBank and "да" or "нет", sum.includeEquipped and "да" or "нет"))
+                    DEFAULT_CHAT_FRAME:AddMessage(string.format("|cff38bdf8[Прогрессия]|r Найдено к улучшению: %d (цель<=%d, сорт=%s, Банк вещей=%s, надетые=%s).",
+                        sum.totalEligible or 0, sum.maxTier or 3, tostring(sum.sortMode or "default"), sum.includeBank and "да" or "нет", sum.includeEquipped and "да" or "нет"))
                 end
                 RefreshValdrisBar()
             else
@@ -7965,18 +8267,20 @@ do
         end)
         goBtn:SetScript("OnEnter", function(self)
             local sum = AP:GetValdrisUpgradeSummary(false)
+            local sDef = GetValdrisSortDef(sum.sortMode)
             GameTooltip:SetOwner(self, "ANCHOR_TOP")
             GameTooltip:SetText("|cffffd200Автоулучшение вещей (AttuneParser)|r")
             GameTooltip:AddLine("ЛКМ: старт/стоп авто-повышения ковки для поглощенных несетовых вещей (сумки + Банк вещей).", 0.9, 0.9, 0.9, true)
             GameTooltip:AddLine("ПКМ: пересканировать.", 0.4, 1.0, 0.4, true)
+            GameTooltip:AddLine("Порядок ковки: " .. sDef.menuLabel, 0.95, 0.85, 0.4, true)
             GameTooltip:AddLine(string.format("Готово к улучшению: %d | Улучшено за сессию: %d", sum.totalEligible or 0, sum.doneCount or 0), 0.7, 0.85, 1.0, true)
             GameTooltip:Show()
         end)
         goBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
         f.goBtn = goBtn
 
-        local tierBtn = PS.MakeBtn(f, 108, 20, "Цель: Титан (3)", "dark")
-        tierBtn:SetPoint("LEFT", goBtn, "RIGHT", 4, 0)
+        local tierBtn = PS.MakeBtn(f, 102, 20, "Цель: Титан (3)", "dark")
+        tierBtn:SetPoint("LEFT", goBtn, "RIGHT", 3, 0)
         tierBtn:SetScript("OnClick", function() AP:CycleValdrisMaxTier() end)
         tierBtn:SetScript("OnEnter", function(self)
             GameTooltip:SetOwner(self, "ANCHOR_TOP")
@@ -7987,9 +8291,13 @@ do
         tierBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
         f.tierBtn = tierBtn
 
+        local sortBtn = CreateValdrisSortButton(f, 132, 20, "ANCHOR_TOP")
+        sortBtn:SetPoint("LEFT", tierBtn, "RIGHT", 3, 0)
+        f.sortBtn = sortBtn
+
         local incBkChk = CreateFrame("Button", nil, f)
-        incBkChk:SetPoint("LEFT", tierBtn, "RIGHT", 5, 0)
-        incBkChk:SetSize(78, 20)
+        incBkChk:SetPoint("LEFT", sortBtn, "RIGHT", 5, 0)
+        incBkChk:SetSize(54, 20)
         local bBox = CreateFrame("Frame", nil, incBkChk)
         bBox:SetPoint("LEFT", incBkChk, "LEFT", 0, 0)
         bBox:SetSize(15, 15)
@@ -7998,7 +8306,7 @@ do
         bmk:SetPoint("CENTER", 0, 0)
         local blbl = incBkChk:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
         blbl:SetPoint("LEFT", bBox, "RIGHT", 4, 0)
-        blbl:SetText("Из банка")
+        blbl:SetText("Банк")
         incBkChk._box = bBox
         incBkChk._mk = bmk
         incBkChk:SetScript("OnClick", function()
@@ -8014,8 +8322,8 @@ do
         f.incBkChk = incBkChk
 
         local incEqChk = CreateFrame("Button", nil, f)
-        incEqChk:SetPoint("LEFT", incBkChk, "RIGHT", 4, 0)
-        incEqChk:SetSize(102, 20)
+        incEqChk:SetPoint("LEFT", incBkChk, "RIGHT", 3, 0)
+        incEqChk:SetSize(72, 20)
         local eBox = CreateFrame("Frame", nil, incEqChk)
         eBox:SetPoint("LEFT", incEqChk, "LEFT", 0, 0)
         eBox:SetSize(15, 15)
@@ -8024,7 +8332,7 @@ do
         emk:SetPoint("CENTER", 0, 0)
         local elbl = incEqChk:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
         elbl:SetPoint("LEFT", eBox, "RIGHT", 4, 0)
-        elbl:SetText("Снять надетое")
+        elbl:SetText("Надетые")
         incEqChk._box = eBox
         incEqChk._mk = emk
         incEqChk:SetScript("OnClick", function()
@@ -8040,8 +8348,8 @@ do
         f.incEqChk = incEqChk
 
         local autoChk = CreateFrame("Button", nil, f)
-        autoChk:SetPoint("LEFT", incEqChk, "RIGHT", 4, 0)
-        autoChk:SetSize(90, 20)
+        autoChk:SetPoint("LEFT", incEqChk, "RIGHT", 3, 0)
+        autoChk:SetSize(54, 20)
         local cBox = CreateFrame("Frame", nil, autoChk)
         cBox:SetPoint("LEFT", autoChk, "LEFT", 0, 0)
         cBox:SetSize(15, 15)
@@ -8049,8 +8357,8 @@ do
         local mk = cBox:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
         mk:SetPoint("CENTER", 0, 0)
         local lbl = autoChk:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-        lbl:SetPoint("LEFT", cBox, "RIGHT", 5, 0)
-        lbl:SetText("Авто-старт")
+        lbl:SetPoint("LEFT", cBox, "RIGHT", 4, 0)
+        lbl:SetText("Авто")
         autoChk._box = cBox
         autoChk._mk = mk
         autoChk:SetScript("OnClick", function()
