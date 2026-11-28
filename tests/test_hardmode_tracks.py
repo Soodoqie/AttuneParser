@@ -472,7 +472,8 @@ function AP:GetParagonXPBreakdown()
     return {
         attuneMult = 1, attuneIsSaturday = false, attuneHasElixir = false, attuneGuildPct = 0, attuneGuildKnown = true,
         paragonX2Active = false, paragonX2Mult = 1, paragonX2Sources = {}, paragonX2Wasted = false,
-        paragonPerkPts = nil, paragonPerkPct = 0, paragonMapXP = 100, paragonMobMult = 1, guildExpPct = 0, guildExpKnown = true,
+        paragonPerkPts = nil, paragonPerkPct = 0, paragonDlvl = 0, paragonDlvlBonus = 0, paragonDlvlChatBonus = 0,
+        paragonMapXP = 100, paragonMobMult = 1, guildExpPct = 0, guildExpKnown = true,
     }
 end
 function AP:GetLockedZonesMap() return {} end
@@ -2560,22 +2561,36 @@ def run_real_attune_parser_core_tests():
         if not a then return nil end
         return a[1], "", "Interface\\Icons\\INV_Misc_QuestionMark", 1, nil, 3600, 0, "player", false, false, a[2]
     end
-    _G.serverData = { level = 120, experience = 500, expMax = 2000, stats = { [19] = 50 } }
+    _G.serverData = { level = 120, experience = 500, expMax = 2000, stats = { [19] = 50 }, dlvl = 4, dlvlBonus = 25, mapXP = 50 }
     AP.mentorWhere = { v2 = true, gift = 1, elixir = 1, guildPct = 25 }
     AP.guildAttuneBonusPct = 25
     local eqXP = AP:GetEquippedAttuneProgress()
     assert(math.abs((eqXP.xpMult or 0) - 3.75) < 0.001, "Attune XP must be (1+1+1)*1.25 = 3.75! got=" .. tostring(eqXP.xpMult))
     local px = AP:GetParagonXPBreakdown()
     assert(px.paragonX2Mult == 2 and px.paragonX2Wasted == true, "Multiple x2 Paragon sources must stay x2 and flag overlap!")
-    assert(math.abs((px.paragonMobMult or 0) - 2.5) < 0.001, "Paragon mob mult with x2 + 25% perk must be 2.5! got=" .. tostring(px.paragonMobMult))
+    assert(px.paragonDlvl == 4 and px.paragonDlvlName == "Титаническая" and px.paragonDlvlBonus == 25 and px.paragonDlvlChatBonus == 200, "Must expose live dlvl & dlvlBonus!")
+    assert(math.abs((px.paragonMobMult or 0) - 1.5625) < 0.001, "Paragon mob mult with x2 + 25% perk + 25% dlvl + 0.5 mapXP must be 1.5625! got=" .. tostring(px.paragonMobMult))
     AP:OpenUI("summary")
     local sp = AttuneParserFrame and AttuneParserFrame.tabPanels and AttuneParserFrame.tabPanels.summary
     local c2Txt = sp and sp._c2 and sp._c2.body and sp._c2.body:GetText() or ""
     assert(c2Txt:find("x3.75", 1, true) and c2Txt:find("Гильдия +25%", 1, true), "Card 2 must show x3.75 (not x3.7) and Гильдия +25%! got=" .. c2Txt)
-    assert(c2Txt:find("x2.5", 1, true) and c2Txt:find("x2 не стак.", 1, true), "Card 2 must show Paragon x2.5 and non-stacking notice! got=" .. c2Txt)
+    assert(c2Txt:find("x1.56", 1, true) and c2Txt:find("Титаническая +25%", 1, true) and c2Txt:find("карта x0.5", 1, true) and c2Txt:find("x2 не стак.", 1, true), "Card 2 must show live dlvlBonus, mapXP & non-stacking notice! got=" .. c2Txt)
     assert(c2Txt:find("0 зол.", 1, true) and not c2Txt:find("~0g", 1, true), "Card 2 must use зол. instead of ~0g!")
     assert(c2Txt:find("все поглощены на 100%", 1, true) and not c2Txt:find("~0 кв.", 1, true), "Card 2 must show completed status when eq.count==0!")
     sp._c2._xpHelpBtn._scripts.OnEnter(sp._c2._xpHelpBtn)
+    local hf = _G.AP_XPHelpFrame
+    assert(hf and hf:IsShown(), "Hovering Правила опыта (?) must open opaque AP_XPHelpFrame!")
+    local hTxt = hf.body:GetText()
+    assert(hTxt:find("+30%", 1, true) and hTxt:find("+60%", 1, true) and hTxt:find("+120%", 1, true) and hTxt:find("+200%", 1, true), "Help popup must document exact chat difficulty XP bonuses!")
+    assert(hTxt:find("Наксрамас x0.5", 1, true) and hTxt:find("1040174", 1, true), "Help popup must document mapXP and Newbie Blessing cap!")
+    sp._c2._xpHelpBtn._scripts.OnLeave(sp._c2._xpHelpBtn)
+    assert(not hf:IsShown(), "OnLeave must hide unpinned help popup!")
+    sp._c2._xpHelpBtn._scripts.OnClick(sp._c2._xpHelpBtn)
+    assert(hf:IsShown() and hf.pinned, "Clicking Правила опыта (?) must pin help popup open!")
+    sp._c2._xpHelpBtn._scripts.OnLeave(sp._c2._xpHelpBtn)
+    assert(hf:IsShown(), "OnLeave must keep pinned help popup visible!")
+    hf.closeBtn._scripts.OnClick(hf.closeBtn)
+    assert(not hf:IsShown() and not hf.pinned, "Closing help popup must hide and unpin!")
     _G.UnitAura, _G.serverData, AP.mentorWhere, AP.guildAttuneBonusPct, _G.UnitLevel = _oUA, _oSD, _oMW, _oGP, _oUL
 
     -- Test G (21k core audit fixes): GetItemHyperlink full-link 2nd return, BuildItemTooltip real SetHyperlink,
@@ -3064,6 +3079,16 @@ def run_real_full_integrated_tests():
     wfT.applyBtn._scripts.OnClick(wfT.applyBtn, "LeftButton")
     assert(TalorianTP:IsBlockEnabled("modeBar") and TalorianTP:IsBlockEnabled("tabServer") and ui22.tabs[5]:IsShown(),
         "Full preset must restore all TalorianTP UI blocks!")
+    -- Verify difficulty tier labels ("1: Необычная") and tooltips exist in server tab
+    ui22.tabs[5]._scripts.OnClick(ui22.tabs[5], "LeftButton")
+    local foundNeob = false
+    for _, fr in ipairs(_G._FRAMES) do
+        if fr.txt and fr.txt:GetText() == "1: Необычная" then
+            foundNeob = true
+            assert(fr._scripts and fr._scripts.OnEnter, "1: Необычная must have OnEnter tooltip!")
+        end
+    end
+    assert(foundNeob, "TalorianTP server tab must label tier 1 as '1: Необычная'!")
 
     return "FULL_INTEGRATED_PASSED"
     ''')

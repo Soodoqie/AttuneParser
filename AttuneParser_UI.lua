@@ -1608,30 +1608,178 @@ local function BuildSummaryTab(parent)
 
     local xpHelpBtn = PS.MakeBtn(c2, 108, 18, "Правила опыта (?)", "dark")
     xpHelpBtn:SetPoint("TOPRIGHT", c2, "TOPRIGHT", -8, -7)
-    xpHelpBtn:SetScript("OnEnter", function(self)
-        local px = (type(AP.GetParagonXPBreakdown) == "function") and AP:GetParagonXPBreakdown() or {}
-        GameTooltip:SetOwner(self, "ANCHOR_LEFT")
-        GameTooltip:SetText("|cffffd200Как складывается опыт на сервере|r")
-        GameTooltip:AddLine(" ")
-        GameTooltip:AddLine("|cff40ff401. Опыт поглощения предметов:|r", 1, 1, 1)
-        GameTooltip:AddLine("  Формула: (1 + Дар Субботы [+1] + Эликсир поглощения [+1]) x (1 + Гильдия +5/10/25%)", 0.9, 0.9, 0.9, true)
-        GameTooltip:AddLine("  - Дар Субботы и Эликсир поглощения |cffffffffскладываются|r (макс. x3), затем умножаются на гильдию (до |cff40ff40x3.75|r).", 0.85, 0.85, 0.85, true)
-        GameTooltip:AddLine("  - Перк «Опыт Paragon», Эликсир двойного опыта и Дар Воскресенья на поглощение |cffff6060не влияют|r.", 0.85, 0.85, 0.85, true)
-        GameTooltip:AddLine(" ")
-        GameTooltip:AddLine("|cff38bdf82. Опыт Paragon (Доп. уровень):|r", 1, 1, 1)
-        GameTooltip:AddLine("  - Базовые удвоения |cffff6060не суммируются|r (действует одно x2): Эликсир двойного опыта, Дар Воскресенья, Праздник опыта (Сб), Благословение новичка (до 100 ур.).", 0.9, 0.9, 0.9, true)
-        GameTooltip:AddLine("  - За убийство существ перемножаются: (x2 или x1) x (1 + перк «Опыт Paragon» до +25%) x (1 + сложность данжа: 0/5/15/25%) x коэф. карты (напр. Накс x0.5).", 0.85, 0.85, 0.85, true)
-        GameTooltip:AddLine(" ")
-        GameTooltip:AddLine("|cffffd2003. Обычный опыт и гильдия:|r", 1, 1, 1)
-        GameTooltip:AddLine("  - «Гильдейский бонус: Опытность» (+5..25%) ускоряет обычный опыт и удваивается Эликсиром двойного опыта.", 0.85, 0.85, 0.85, true)
-        GameTooltip:AddLine("  - «Единство гильдии» (+5/10%) ускоряет только опыт самой гильдии.", 0.85, 0.85, 0.85, true)
-        if px.paragonX2Wasted then
-            GameTooltip:AddLine(" ")
-            GameTooltip:AddLine("|cffff6060Внимание: активно несколько источников x2 (" .. table.concat(px.paragonX2Sources or {}, " + ") .. ") - лишний бафф не дает x4!|r", 1, 0.4, 0.4, true)
+    local function EnsureXPHelpFrame()
+        local hf = _G.AP_XPHelpFrame
+        if hf then return hf end
+        hf = CreateFrame("Frame", "AP_XPHelpFrame", UIParent)
+        hf:SetSize(486, 520)
+        hf:SetFrameStrata("FULLSCREEN_DIALOG")
+        hf:SetToplevel(true)
+        hf:SetClampedToScreen(true)
+        hf:EnableMouse(true)
+        hf:SetMovable(true)
+        hf:RegisterForDrag("LeftButton")
+        hf:SetScript("OnDragStart", function(self) self:StartMoving() end)
+        hf:SetScript("OnDragStop", function(self) self:StopMovingOrSizing() end)
+        hf:SetBackdrop({
+            bgFile = "Interface\\Buttons\\WHITE8X8",
+            edgeFile = "Interface\\Buttons\\WHITE8X8",
+            edgeSize = 1,
+            insets = { left = 1, right = 1, top = 1, bottom = 1 },
+        })
+        hf:SetBackdropColor(0.04, 0.05, 0.08, 0.99)
+        hf:SetBackdropBorderColor(0.78, 0.62, 0.24, 0.95)
+        hf:Hide()
+
+        local hbg = hf:CreateTexture(nil, "BORDER")
+        hbg:SetTexture("Interface\\Buttons\\WHITE8X8")
+        hbg:SetVertexColor(0.11, 0.09, 0.06, 0.98)
+        hbg:SetPoint("TOPLEFT", hf, "TOPLEFT", 1, -1)
+        hbg:SetPoint("TOPRIGHT", hf, "TOPRIGHT", -1, -1)
+        hbg:SetHeight(28)
+
+        local sep = hf:CreateTexture(nil, "ARTWORK")
+        sep:SetTexture("Interface\\Buttons\\WHITE8X8")
+        sep:SetVertexColor(0.78, 0.62, 0.24, 0.55)
+        sep:SetHeight(1)
+        sep:SetPoint("TOPLEFT", hf, "TOPLEFT", 1, -29)
+        sep:SetPoint("TOPRIGHT", hf, "TOPRIGHT", -1, -29)
+
+        hf.title = hf:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        hf.title:SetPoint("TOPLEFT", hf, "TOPLEFT", 12, -8)
+        hf.title:SetText("|cffffd200Как складывается опыт на сервере (WoW Prime)|r")
+
+        local closeBtn = CreateFrame("Button", nil, hf)
+        closeBtn:SetSize(20, 20)
+        closeBtn:SetPoint("TOPRIGHT", hf, "TOPRIGHT", -6, -5)
+        PS.StyleClose(closeBtn, 20)
+        closeBtn:SetScript("OnClick", function()
+            hf.pinned = false
+            hf:Hide()
+        end)
+        hf.closeBtn = closeBtn
+
+        hf.body = hf:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        hf.body:SetPoint("TOPLEFT", hf, "TOPLEFT", 12, -36)
+        hf.body:SetWidth(462)
+        hf.body:SetJustifyH("LEFT")
+        hf.body:SetJustifyV("TOP")
+        if hf.body.SetSpacing then hf.body:SetSpacing(2) end
+
+        hf.foot = hf:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        hf.foot:SetPoint("BOTTOMLEFT", hf, "BOTTOMLEFT", 12, 8)
+        hf.foot:SetPoint("BOTTOMRIGHT", hf, "BOTTOMRIGHT", -12, 8)
+        hf.foot:SetJustifyH("LEFT")
+        hf.foot:SetText("|cff94a3b8ЛКМ по кнопке: закрепить/открепить окно | Перетаскивание: за шапку|r")
+
+        if AttuneParserFrame and AttuneParserFrame.HookScript then
+            AttuneParserFrame:HookScript("OnHide", function()
+                hf.pinned = false
+                hf:Hide()
+            end)
         end
-        GameTooltip:Show()
+        return hf
+    end
+    local function BuildXPHelpText()
+        local px = (type(AP.GetParagonXPBreakdown) == "function") and AP:GetParagonXPBreakdown() or {}
+        local eq = (type(AP.GetEquippedAttuneProgress) == "function") and AP:GetEquippedAttuneProgress() or {}
+        local fmt = (type(AP.FormatMult) == "function") and AP.FormatMult or function(m) return tostring(m or 1) end
+        local lines = {}
+
+        local dlvlNote = "вне сложного данжа"
+        if (px.paragonDlvl or 0) > 0 then
+            dlvlNote = string.format("%s (чат +%d%%, Paragon dlvlBonus +%d%%)",
+                px.paragonDlvlName or ("#" .. tostring(px.paragonDlvl)),
+                px.paragonDlvlChatBonus or 0,
+                px.paragonDlvlBonus or 0)
+        end
+        local mapNote = ((px.paragonMapXP or 100) ~= 100) and string.format(", карта x%s", fmt((px.paragonMapXP or 100) / 100)) or ""
+        local gAttStr = (eq.guildKnown == false) and "?" or string.format("+%d%%", eq.guildPct or 0)
+        table.insert(lines, string.format(
+            "|cffffd200Сейчас на персонаже:|r  Поглощение: |cff40ff40x%s|r (Гильдия %s%s%s) | Paragon (мобы): |cff38bdf8x%s|r (%s%s%s)",
+            fmt(eq.xpMult or 1), gAttStr,
+            eq.isSaturday and ", Дар Сб x2" or "",
+            eq.hasElixir and ", Эликс. погл. x2" or "",
+            fmt(px.paragonMobMult or 1),
+            px.paragonX2Active and ("x2: " .. tostring(px.paragonX2Source or "бафф")) or "без x2",
+            (px.paragonPerkPts and px.paragonPerkPts > 0) and (", перк +" .. fmt(px.paragonPerkPct or 0) .. "%") or "",
+            mapNote
+        ))
+        table.insert(lines, "Активная сложность инста: |cffffffff" .. dlvlNote .. "|r")
+        if px.paragonX2Wasted then
+            table.insert(lines, "|cffff6060Внимание: активно несколько x2 (" .. table.concat(px.paragonX2Sources or {}, " + ") .. ") - лишний бафф не дает x4!|r")
+        end
+
+        table.insert(lines, "")
+        table.insert(lines, "|cff40ff401. Опыт поглощения предметов:|r")
+        table.insert(lines, "  Формула: (1 + Дар Субботы [+1] + Эликсир поглощения [+1]) x (1 + Гильдия +5/10/25%)")
+        table.insert(lines, "  * Дар Субботы (900206) и Эликсир (900210) складываются (до x3), затем x Гильдия = до |cff40ff40x3.75|r.")
+        table.insert(lines, "  * База: обычный квест 100, групповой 200, квест данжа 350, моб в мире = уровень/2 (40 для 80 ур.). Опыт идет всем надетым подходящим вещам; нужно 0.24 x ilvl^2.")
+        table.insert(lines, "  * Вещи с требованием 80 ур. (кроме стартовых) не качаются на мобах в мире - только квесты и инсты.")
+        table.insert(lines, "  * |cffff6060НЕ влияют|r на поглощение: Эликсир двойного опыта, Дар Воскресенья, Праздник опыта, Благословение новичка, перк Paragon и сложность данжа.")
+
+        table.insert(lines, "")
+        table.insert(lines, "|cff38bdf82. Опыт Paragon (Доп. уровень):|r")
+        table.insert(lines, "  * Базовые x2 |cffff6060НЕ суммируются|r (действует только одно x2): Эликсир двойного опыта (900211), Дар Воскресенья (900207), Праздник опыта (Сб, 900125), Благословение новичка (1040174, до 100 ур. Paragon).")
+        table.insert(lines, "  * За существ перемножаются: (x2 или x1) x (1 + перк «Опыт Paragon» до +25%) x (1 + dlvlBonus сложности с сервера) x коэф. карты (напр. Наксрамас x0.5). На квесты сложность и mapXP не действуют.")
+        table.insert(lines, "  * На ExtraLevel-мирах у Луизы есть бафф «Опытный максималист» (+10% за 200 ур., стак до 100).")
+
+        table.insert(lines, "")
+        table.insert(lines, "|cffff9f403. Дополнительная сложность инстов ([Сложность]):|r")
+        table.insert(lines, "  |cff1eff001 Необычная:|r урон -20%, хил -15%, |cff40ff40опыт +30%|r | враги: HP x1.48, удар 18%/36%, крит +20%/+24%")
+        table.insert(lines, "  |cffbb79e82 Эпическая:|r урон -40%, укл/пар/бл -15, броня -15%, хил -30%, |cff40ff40опыт +60%|r | враги: HP x2.18, удар 60%/120%, крит +33%/+40%")
+        table.insert(lines, "  |cffff80003 Легендарная:|r урон -60%, укл/пар/бл -40, броня -45%, хил -50%, |cff40ff40опыт +120%|r | враги: HP x2.96, удар 90%/180%, крит +42%/+50%")
+        table.insert(lines, "  |cff00ffcc4 Титаническая:|r урон -75%, укл/пар/бл -75, броня -65%, хил -80%, |cff40ff40опыт +200%|r | враги: HP x3.80, удар 118%/236%, крит +48%/+57.6%")
+        table.insert(lines, "  * В клиенте Paragon для dlvlBonus указаны ориентиры +0/5/15/25% за мобов, но аддон берет точное значение dlvlBonus напрямую с сервера.")
+
+        table.insert(lines, "")
+        table.insert(lines, "|cffffd2004. Обычный опыт (1-80) и гильдия:|r")
+        table.insert(lines, "  * «Опытность» (+5/10/15/25%) ускоряет обычный опыт; Эликсир двойного опыта (900211) удваивает обычный, гильдейский и Paragon опыт.")
+        table.insert(lines, "  * «Единство гильдии» (+5/10%) ускоряет только опыт гильдии (база 75+: +40/+80/+200 моб/элита/босс, квесты +100..+140).")
+        return table.concat(lines, "\n")
+    end
+    local function ShowXPHelp(anchor, pinMode)
+        local hf = EnsureXPHelpFrame()
+        if pinMode then
+            if hf:IsShown() and hf.pinned then
+                hf.pinned = false
+                hf:Hide()
+                return
+            end
+            hf.pinned = true
+        end
+        hf.body:SetText(BuildXPHelpText())
+        if hf.body.GetStringHeight then
+            local h = math.max(360, math.min(600, (hf.body:GetStringHeight() or 460) + 64))
+            hf:SetHeight(h)
+        end
+        hf:ClearAllPoints()
+        local mainFr = AttuneParserFrame
+        local scrRight = (UIParent and UIParent.GetRight and UIParent:GetRight()) or 1024
+        local mainRight = (mainFr and mainFr.GetRight and mainFr:GetRight()) or 800
+        local mainLeft = (mainFr and mainFr.GetLeft and mainFr:GetLeft()) or 0
+        if mainFr and (scrRight - mainRight) >= 496 then
+            hf:SetPoint("TOPLEFT", mainFr, "TOPRIGHT", 8, -28)
+        elseif mainFr and mainLeft >= 496 then
+            hf:SetPoint("TOPRIGHT", mainFr, "TOPLEFT", -8, -28)
+        elseif mainFr then
+            hf:SetPoint("TOPLEFT", mainFr, "TOPLEFT", 14, -34)
+        else
+            hf:SetPoint("TOPRIGHT", anchor, "TOPLEFT", -8, 0)
+        end
+        hf:Show()
+        if type(hf.Raise) == "function" then pcall(hf.Raise, hf) end
+    end
+    xpHelpBtn:SetScript("OnEnter", function(self)
+        ShowXPHelp(self, false)
     end)
-    xpHelpBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    xpHelpBtn:SetScript("OnLeave", function()
+        local hf = _G.AP_XPHelpFrame
+        if hf and not hf.pinned then hf:Hide() end
+    end)
+    xpHelpBtn:SetScript("OnClick", function(self)
+        ShowXPHelp(self, true)
+    end)
     c2._xpHelpBtn = xpHelpBtn
     box._c2 = c2
 
@@ -1769,6 +1917,12 @@ local function BuildSummaryTab(parent)
         end
         if px.paragonPerkPts and px.paragonPerkPts > 0 then
             table.insert(parParts, string.format("перк +%s%%", fmtMult(px.paragonPerkPct or 0)))
+        end
+        if (px.paragonDlvlBonus or 0) > 0 then
+            table.insert(parParts, string.format("%s +%d%%", px.paragonDlvlName or "сложн.", px.paragonDlvlBonus))
+        end
+        if (px.paragonMapXP or 100) ~= 100 then
+            table.insert(parParts, string.format("карта x%s", fmtMult((px.paragonMapXP or 100) / 100)))
         end
         if (px.guildExpPct or 0) > 0 then
             table.insert(parParts, string.format("оп. ги +%d%%", px.guildExpPct))

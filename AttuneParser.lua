@@ -9,7 +9,7 @@
 local AP = _G.AttuneParser or {}
 _G.AttuneParser = AP
 
-AP.VERSION = "1.3.0"
+AP.VERSION = "1.3.1"
 AP.Data = AP.Data or {}
 
 -- User-confirmed server tier defaults (replaced live when ASMSG_ATTUNE_TIERS arrives)
@@ -3288,6 +3288,19 @@ do
         return gAtt, gKnown
     end
 
+    local PARAGON_DLVL_NAMES = {
+        [1] = "Необычная",
+        [2] = "Эпическая",
+        [3] = "Легендарная",
+        [4] = "Титаническая",
+    }
+    local PARAGON_DLVL_CHAT_XP = {
+        [1] = 30,
+        [2] = 60,
+        [3] = 120,
+        [4] = 200,
+    }
+
     function AP:GetParagonXPBreakdown()
         local gift = AP:GetActiveDailyGift(false)
         local eq = AP:GetEquippedAttuneProgress()
@@ -3306,9 +3319,13 @@ do
         local x2Mult = hasX2 and 2 or 1
         local perkPts = (type(sd) == "table" and type(sd.stats) == "table") and tonumber(sd.stats[19]) or nil
         local perkPct = perkPts and (perkPts * 0.5) or 0
+        local dlvl = (type(sd) == "table" and tonumber(sd.dlvl)) or 0
+        if dlvl < 0 then dlvl = 0 end
+        local dlvlBonus = (type(sd) == "table" and tonumber(sd.dlvlBonus)) or 0
+        if dlvlBonus < 0 then dlvlBonus = 0 end
         local mapXP = (type(sd) == "table" and tonumber(sd.mapXP)) or 100
         if mapXP <= 0 then mapXP = 100 end
-        local mobMultBase = x2Mult * (1 + perkPct / 100) * (mapXP / 100)
+        local mobMultBase = x2Mult * (1 + perkPct / 100) * (1 + dlvlBonus / 100) * (mapXP / 100)
         return {
             attuneMult = eq.xpMult or 1,
             attuneIsSaturday = eq.isSaturday == true,
@@ -3322,6 +3339,10 @@ do
             paragonX2Wasted = (#x2Sources > 1),
             paragonPerkPts = perkPts,
             paragonPerkPct = perkPct,
+            paragonDlvl = dlvl,
+            paragonDlvlName = PARAGON_DLVL_NAMES[dlvl],
+            paragonDlvlBonus = dlvlBonus,
+            paragonDlvlChatBonus = PARAGON_DLVL_CHAT_XP[dlvl] or 0,
             paragonMapXP = mapXP,
             paragonMobMult = mobMultBase,
             guildExpPct = gExpPct or 0,
@@ -4776,10 +4797,17 @@ do
             end
             local guildChatStr = (eq.guildKnown == false) and "?" or string.format("+%d%%", eq.guildPct or 0)
             local px = AP:GetParagonXPBreakdown()
+            local parExtra = px.paragonX2Active and (px.paragonX2Source or "x2") or "база"
+            if (px.paragonDlvlBonus or 0) > 0 then
+                parExtra = parExtra .. string.format(", %s +%d%%", px.paragonDlvlName or "сложн.", px.paragonDlvlBonus)
+            end
+            if (px.paragonMapXP or 100) ~= 100 then
+                parExtra = parExtra .. string.format(", карта x%s", AP.FormatMult((px.paragonMapXP or 100) / 100))
+            end
             DEFAULT_CHAT_FRAME:AddMessage(string.format("  Пыль: Мерцающая=%d, Пылающая=%d, Астральная=%d (обмен %d:1/%d:1: Астральная +%d, Титан=%d) | Сундуки=%d | Поглощение x%s (Гильдия %s%s%s) | Paragon x%s (%s)",
                 st.dustEpic, st.dustLeg, st.dustTit, st.rate1 or 3, st.rate2 or 3, st.craftableTit or 0, st.totalTitPotential or 0, st.titanBoxes,
                 AP.FormatMult(eq.xpMult or 1), guildChatStr, g.isSaturday and ", Дар Субботы x2" or "", g.hasElixir and ", Эликс. погл. x2" or "",
-                AP.FormatMult(px.paragonMobMult or 1), px.paragonX2Active and (px.paragonX2Source or "x2") or "база"))
+                AP.FormatMult(px.paragonMobMult or 1), parExtra))
         elseif msg == "info" or msg == "spec" then
             local cat = AP:GetAccountCatalogSummary()
             local par = AP:GetParagonInfo()
