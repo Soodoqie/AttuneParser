@@ -89,6 +89,7 @@ do
             for _, rg in ipairs({ btn:GetRegions() }) do
                 if rg.GetObjectType and rg:GetObjectType() == "FontString" then rg:Hide() end
             end
+            if btn._psFallbackTxt then btn._psFallbackTxt:Hide() end
             if not btn._psTex then
                 local t = btn:CreateTexture(nil, "ARTWORK")
                 t:SetAllPoints(btn)
@@ -107,6 +108,24 @@ do
             btn:SetBackdrop({ bgFile = WHITE, edgeFile = WHITE, edgeSize = 1 })
             btn:SetBackdropColor(0.38, 0.11, 0.11, 0.95)
             btn:SetBackdropBorderColor(0.65, 0.48, 0.22, 1)
+            local hasFs = false
+            for _, rg in ipairs({ btn:GetRegions() }) do
+                if rg.GetObjectType and rg:GetObjectType() == "FontString" then
+                    hasFs = true
+                    rg:Show()
+                end
+            end
+            if not hasFs then
+                local xfs = btn._psFallbackTxt
+                if not xfs then
+                    xfs = btn:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+                    xfs:SetPoint("CENTER", 0, 0)
+                    xfs:SetText("X")
+                    xfs:SetTextColor(1, 0.85, 0.6)
+                    btn._psFallbackTxt = xfs
+                end
+                xfs:Show()
+            end
         end
     end
     function PS.PaintBtn(b, kind, tint)
@@ -236,35 +255,40 @@ do
             end
         end
 
+        local function layoutThumb()
+            local maxOff = math.max(0, (sf.total or 0) - visCount)
+            if maxOff <= 0 then
+                isDragging = false
+                bar:Hide()
+                return
+            end
+            bar:Show()
+            local bTop = bar.GetTop and bar:GetTop()
+            local bBot = bar.GetBottom and bar:GetBottom()
+            local bh = (bTop and bBot and (bTop > bBot)) and (bTop - bBot) or bar:GetHeight()
+            if not bh or bh <= 1 then bh = math.max(40, (listHeight or 100) - 4) end
+            local trackH = math.max(24, bh - (BTN_H * 2 + 4))
+            local thumbH = math.max(20, math.floor(trackH * (visCount / math.max(1, sf.total))))
+            if thumbH > trackH then thumbH = trackH end
+            local travel = math.max(0, trackH - thumbH)
+            sf._trackH = trackH
+            sf._thumbH = thumbH
+            sf._travel = travel
+            if thumb then
+                thumb:SetHeight(thumbH)
+                local yOff = math.floor(travel * (sf.offset / maxOff) + 0.5)
+                thumb:ClearAllPoints()
+                thumb:SetPoint("TOP", bar, "TOP", 0, -(BTN_H + 2 + yOff))
+            end
+        end
+
         local function clampAndRefresh(newOff)
             local maxOff = math.max(0, (sf.total or 0) - visCount)
             newOff = math.floor((newOff or 0) + 0.5)
             if newOff < 0 then newOff = 0 end
             if newOff > maxOff then newOff = maxOff end
             sf.offset = newOff
-            if maxOff <= 0 then
-                isDragging = false
-                bar:Hide()
-            else
-                bar:Show()
-                local bTop = bar.GetTop and bar:GetTop()
-                local bBot = bar.GetBottom and bar:GetBottom()
-                local bh = (bTop and bBot and (bTop > bBot)) and (bTop - bBot) or bar:GetHeight()
-                if not bh or bh <= 1 then bh = math.max(40, (listHeight or 100) - 4) end
-                local trackH = math.max(24, bh - (BTN_H * 2 + 4))
-                local thumbH = math.max(20, math.floor(trackH * (visCount / math.max(1, sf.total))))
-                if thumbH > trackH then thumbH = trackH end
-                local travel = math.max(0, trackH - thumbH)
-                sf._trackH = trackH
-                sf._thumbH = thumbH
-                sf._travel = travel
-                if thumb then
-                    thumb:SetHeight(thumbH)
-                    local yOff = (maxOff > 0) and math.floor(travel * (sf.offset / maxOff) + 0.5) or 0
-                    thumb:ClearAllPoints()
-                    thumb:SetPoint("TOP", bar, "TOP", 0, -(BTN_H + 2 + yOff))
-                end
-            end
+            layoutThumb()
             if onUpdateFn then onUpdateFn(sf.offset) end
         end
 
@@ -305,7 +329,8 @@ do
                 self:SetBackdropBorderColor(1.0, 0.86, 0.36, 1)
                 clampAndRefresh((sf.offset or 0) + self._step)
             end)
-            b:SetScript("OnMouseUp", function(self)
+            b:SetScript("OnMouseUp", function(self, mBtn)
+                if mBtn and mBtn ~= "LeftButton" then return end
                 self._held = false
                 self._holdT = 0
                 self._repT = 0
@@ -352,7 +377,8 @@ do
             isDragging = (cy ~= nil)
             paintThumb(true)
         end)
-        thumb:SetScript("OnMouseUp", function()
+        thumb:SetScript("OnMouseUp", function(_, mBtn)
+            if mBtn and mBtn ~= "LeftButton" then return end
             isDragging = false
             paintThumb(false)
         end)
@@ -379,7 +405,8 @@ do
                 clampAndRefresh((sf.offset or 0) + pg)
             end
         end)
-        bar:SetScript("OnMouseUp", function()
+        bar:SetScript("OnMouseUp", function(_, mBtn)
+            if mBtn and mBtn ~= "LeftButton" then return end
             isDragging = false
             paintThumb(false)
         end)
@@ -387,11 +414,24 @@ do
             isDragging = false
             up._held = false; up._mouseStepped = false; up._upAt = nil
             dn._held = false; dn._mouseStepped = false; dn._upAt = nil
+            up:SetBackdropBorderColor(0.58, 0.48, 0.25, 0.92)
+            dn:SetBackdropBorderColor(0.58, 0.48, 0.25, 0.92)
             paintThumb(false)
+        end)
+        bar:SetScript("OnSizeChanged", function()
+            if (sf.total or 0) > visCount then layoutThumb() end
         end)
         bar:SetScript("OnUpdate", function(_, elapsed)
             if not isDragging and not up._held and not dn._held and not up._mouseStepped and not dn._mouseStepped then
                 return
+            end
+            if (isDragging or up._held or dn._held) and type(IsMouseButtonDown) == "function" and not IsMouseButtonDown("LeftButton") then
+                isDragging = false
+                up._held = false
+                dn._held = false
+                up:SetBackdropBorderColor(0.58, 0.48, 0.25, 0.92)
+                dn:SetBackdropBorderColor(0.58, 0.48, 0.25, 0.92)
+                paintThumb(false)
             end
             local el = elapsed or 0
             if isDragging then
@@ -1139,7 +1179,9 @@ local function BuildTopTab(parent)
         end
         if box.searchQuery ~= t then
             box.searchQuery = t
-            AP.After(0.08, function() box.RefreshData() end, "ap_ui_search_deb")
+            AP.After(0.08, function()
+                if box:IsShown() then box.RefreshData() end
+            end, "ap_ui_search_deb")
         end
     end)
     searchEdit:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
@@ -1155,6 +1197,7 @@ local function BuildTopTab(parent)
         box.locLabel = "Все"
         box.searchQuery = ""
         searchEdit:SetText("")
+        searchEdit:ClearFocus()
         locMenu:Hide()
         box.RefreshData()
     end)
@@ -1613,7 +1656,7 @@ local function BuildSummaryTab(parent)
         if hf then return hf end
         hf = CreateFrame("Frame", "AP_XPHelpFrame", UIParent)
         hf:SetSize(486, 520)
-        hf:SetFrameStrata("FULLSCREEN_DIALOG")
+        hf:SetFrameStrata("DIALOG")
         hf:SetToplevel(true)
         hf:SetClampedToScreen(true)
         hf:EnableMouse(true)
@@ -1630,6 +1673,9 @@ local function BuildSummaryTab(parent)
         hf:SetBackdropColor(0.04, 0.05, 0.08, 0.99)
         hf:SetBackdropBorderColor(0.78, 0.62, 0.24, 0.95)
         hf:Hide()
+        if type(UISpecialFrames) == "table" then
+            table.insert(UISpecialFrames, "AP_XPHelpFrame")
+        end
 
         local hbg = hf:CreateTexture(nil, "BORDER")
         hbg:SetTexture("Interface\\Buttons\\WHITE8X8")
@@ -1672,12 +1718,19 @@ local function BuildSummaryTab(parent)
         hf.foot:SetJustifyH("LEFT")
         hf.foot:SetText("|cff94a3b8ЛКМ по кнопке: закрепить/открепить окно | Перетаскивание: за шапку|r")
 
-        if AttuneParserFrame and AttuneParserFrame.HookScript then
-            AttuneParserFrame:HookScript("OnHide", function()
-                hf.pinned = false
-                hf:Hide()
-            end)
+        local function HideXPHelpOnParentClose()
+            hf.pinned = false
+            hf:Hide()
         end
+        if AttuneParserFrame and AttuneParserFrame.HookScript then
+            AttuneParserFrame:HookScript("OnHide", HideXPHelpOnParentClose)
+        end
+        if c2 and c2.HookScript then
+            c2:HookScript("OnHide", HideXPHelpOnParentClose)
+        end
+        hf:SetScript("OnHide", function(self)
+            self.pinned = false
+        end)
         return hf
     end
     local function BuildXPHelpText()
@@ -1753,19 +1806,21 @@ local function BuildSummaryTab(parent)
             local h = math.max(360, math.min(600, (hf.body:GetStringHeight() or 460) + 64))
             hf:SetHeight(h)
         end
-        hf:ClearAllPoints()
-        local mainFr = AttuneParserFrame
-        local scrRight = (UIParent and UIParent.GetRight and UIParent:GetRight()) or 1024
-        local mainRight = (mainFr and mainFr.GetRight and mainFr:GetRight()) or 800
-        local mainLeft = (mainFr and mainFr.GetLeft and mainFr:GetLeft()) or 0
-        if mainFr and (scrRight - mainRight) >= 496 then
-            hf:SetPoint("TOPLEFT", mainFr, "TOPRIGHT", 8, -28)
-        elseif mainFr and mainLeft >= 496 then
-            hf:SetPoint("TOPRIGHT", mainFr, "TOPLEFT", -8, -28)
-        elseif mainFr then
-            hf:SetPoint("TOPLEFT", mainFr, "TOPLEFT", 14, -34)
-        else
-            hf:SetPoint("TOPRIGHT", anchor, "TOPLEFT", -8, 0)
+        if pinMode or not hf:IsShown() then
+            hf:ClearAllPoints()
+            local mainFr = AttuneParserFrame
+            local scrRight = (UIParent and UIParent.GetRight and UIParent:GetRight()) or 1024
+            local mainRight = (mainFr and mainFr.GetRight and mainFr:GetRight()) or 800
+            local mainLeft = (mainFr and mainFr.GetLeft and mainFr:GetLeft()) or 0
+            if mainFr and (scrRight - mainRight) >= 496 then
+                hf:SetPoint("TOPLEFT", mainFr, "TOPRIGHT", 8, -28)
+            elseif mainFr and mainLeft >= 496 then
+                hf:SetPoint("TOPRIGHT", mainFr, "TOPLEFT", -8, -28)
+            elseif mainFr then
+                hf:SetPoint("TOPLEFT", mainFr, "TOPLEFT", 14, -34)
+            else
+                hf:SetPoint("TOPRIGHT", anchor, "TOPLEFT", -8, 0)
+            end
         end
         hf:Show()
         if type(hf.Raise) == "function" then pcall(hf.Raise, hf) end
@@ -3529,9 +3584,12 @@ function AP:OpenUI(tabKey)
             f.activeTab = "top"
         end
     end
+    local wasShown = f:IsShown()
     f:Show()
     RaiseFrameFront(f)
-    AP:RefreshUI()
+    if wasShown then
+        AP:RefreshUI()
+    end
     if type(AP.UI_BLOCK_DEFS) == "table" and self:GetSetting("uiOnboardingDone") ~= true and not AP._onboardingAutoOpened then
         AP._onboardingAutoOpened = true
         AP:ShowOnboardingWizard(false)

@@ -2477,6 +2477,27 @@ SUITE_21DE_LUA = r'''
     assert(AP:GetValdrisSort() == "stats_desc" and AP:GetValdrisUpgradeSummary().nextCand.eid == 99504,
         "21i /ap forge sort stats_desc must prioritize highest-stat item 99504!")
 
+    -- Click-outside overlay dismisses AP_ValdrisSortMenu, and pickBtn also closes it
+    vb21i.sortBtn._scripts.OnClick(vb21i.sortBtn, "LeftButton")
+    local dm21i = _G.AP_ValdrisSortDismiss
+    assert(sm21i:IsShown() and dm21i and dm21i:IsShown(), "21i Opening sort menu must show AP_ValdrisSortDismiss!")
+    dm21i._scripts.OnClick(dm21i, "LeftButton")
+    assert(not sm21i:IsShown() and not dm21i:IsShown(), "21i Clicking outside overlay must hide sort menu & overlay!")
+    vb21i.sortBtn._scripts.OnClick(vb21i.sortBtn, "LeftButton")
+    assert(sm21i:IsShown(), "21i Sort menu must reopen")
+    vb21i.pickBtn._scripts.OnClick(vb21i.pickBtn, "LeftButton")
+    assert(not sm21i:IsShown() and not dm21i:IsShown(), "21i Clicking pickBtn must hide AP_ValdrisSortMenu!")
+
+    -- Bugfixes #1 & #2: ASMSG_IPROG_OPEN preSlot survives OnShow & manual ASMSG_IPROG_RESULT updates forgeBag
+    ipf21i:Hide()
+    ipf21i:Show()
+    _G._FireEvent("CHAT_MSG_ADDON", "ASMSG_IPROG_OPEN", "1\t255:24", "WHISPER", "TestHero")
+    _G._TickAll(0.1)
+    assert(AP.serverSync.valdris.lastPicked and AP.serverSync.valdris.lastPicked.bag == 0 and AP.serverSync.valdris.lastPicked.slot == 2,
+        "21i ASMSG_IPROG_OPEN normalized 255:24 -> 0:2 must populate lastPicked!")
+    _G._FireEvent("CHAT_MSG_ADDON", "ASMSG_IPROG_RESULT", "0:0:2:99502:0:1:0\tOk", "WHISPER", "TestHero")
+    assert(AP.forgeBag[0][2] == 1, "21i Manual ASMSG_IPROG_RESULT must update AP.forgeBag[0][2] to 1! got=" .. tostring(AP.forgeBag[0][2]))
+
     -- Restore clean 21i state
     pf21i:Hide()
     AP:SetValdrisSort("default")
@@ -3233,6 +3254,92 @@ def run_real_full_integrated_tests():
         end
     end
     assert(foundNeob, "TalorianTP server tab must label tier 1 as '1: Необычная'!")
+
+    -- Suite 23: Comprehensive regression tests for AttuneParser v1.3.4 + TalorianTP v4.3.2 bugfixes
+    local AP = AttuneParser
+    -- 1. AP:InvalidateCaches(false) clears AP._mem.itemMetaCache & sourceCache in-place
+    AP.Data.Items[99601] = "4|1|6|4|200|80|100|1|0|0|-1|0|5:10|OldItem"
+    local rOld = AP.ParseItemRecord(99601)
+    assert(rOld.coreSum == 10 and AP._mem.itemMetaCache[99601] == rOld)
+    AP.Data.Items[99601] = "4|1|6|4|200|80|100|1|0|0|-1|0|5:55|NewItem"
+    AP:InvalidateCaches(false)
+    assert(AP._mem.itemMetaCache[99601] == nil and AP.ParseItemRecord(99601).coreSum == 55,
+        "InvalidateCaches(false) must clear AP._mem.itemMetaCache in place!")
+    AP.Data.Items[99601] = nil; AP:InvalidateCaches(false)
+
+    -- 2. AP:GetItemStats(eid, numericSfx) uses AttuneParserDB.seenSuffixes without fullLink
+    AttuneParserDB.seenSuffixes[99602] = { [77] = { stats = { [5] = 33 }, coreSum = 33, armor = 12, hp = 0 } }
+    local _, sCs = AP:GetItemStats(99602, 77)
+    assert(sCs == 33, "GetItemStats with numeric suffix 77 must return cached coreSum=33! got=" .. tostring(sCs))
+    AttuneParserDB.seenSuffixes[99602] = nil
+
+    -- 3. AP:GetItemDiffTag clamps bit 4 -> 1 on 2-difficulty WotLK raid (3456 Naxx)
+    local dTag2 = AP:GetItemDiffTag(40384, 3456, 4, false)
+    assert(dTag2 ~= "", "GetItemDiffTag(3456, mask=4) must clamp heroic bit to 2-diff label instead of ''! got=" .. tostring(dTag2))
+
+    -- 4. ASMSG_AS_BL accepts wildcard tier -1
+    _G._FireEvent("CHAT_MSG_ADDON", "ASMSG_AS_BL", "99603:-1", "WHISPER", "TestHero")
+    assert(AP:IsItemBlacklisted(99603, 2) == true, "ASMSG_AS_BL must accept -1 wildcard tier!")
+
+    -- 5. ASMSG_IB_RES "0\tsplitn" acknowledges batch split & ASMSG_IB_DEL removes before firing callbacks
+    AP.serverSync.ibSplit.inFlightKind = "splitn"
+    AP.serverSync.ibSplit.inFlightAt = _G._TIME
+    _G._FireEvent("CHAT_MSG_ADDON", "ASMSG_IB_RES", "0\tsplitn", "WHISPER", "TestHero")
+    assert(AP.serverSync.ibSplit.inFlightKind == nil, "ASMSG_IB_RES 'splitn' must clear inFlightKind!")
+
+    _G.PRIME_ItemBank.items = { { guid = 99610, entry = 63021, suffix = 0, forge = 0, link = "item:63021:0:0:0:0:0:0" } }
+    _G.PRIME_ItemBank.byGuid = { [99610] = _G.PRIME_ItemBank.items[1] }
+    AP.serverSync.ib.items = _G.PRIME_ItemBank.items
+    AP.serverSync.ib.byGuid = _G.PRIME_ItemBank.byGuid
+    local sawRemovedOnEvent = false
+    AP:RegisterCallback("SERVER_SYNC_UPDATED", function(_, tag)
+        if tag == "ASMSG_IB_DEL" then sawRemovedOnEvent = (#AP.serverSync.ib.items == 0) end
+    end)
+    _G._FireEvent("CHAT_MSG_ADDON", "ASMSG_IB_DEL", "99610", "WHISPER", "TestHero")
+    assert(sawRemovedOnEvent, "ASMSG_IB_DEL must remove item from SS.ib.items BEFORE firing SERVER_SYNC_UPDATED!")
+
+    -- 6. TalorianTP QNCWrapper self-heals and does not re-wrap external hook over QNCWrapper
+    local sc23 = TalorianTP.serverCtrl
+    local _oMac23 = _G.IsMacClient
+    sc23:EnsureQNCWrapper()
+    local qWrap23 = _G.IsMacClient
+    local extCalls = 0
+    local function ExtWrapper(k, ...)
+        extCalls = extCalls + 1
+        return qWrap23(k, ...)
+    end
+    _G.IsMacClient = ExtWrapper
+    sc23:EnsureQNCWrapper()
+    local okExt = pcall(_G.IsMacClient, "QNC", "")
+    assert(okExt and extCalls == 1 and _G.IsMacClient == ExtWrapper,
+        "QNCWrapper must break self-cycle with external wrapper and restore chain! extCalls=" .. tostring(extCalls))
+    sc23:EnsureQNCWrapper()
+    assert(_G.IsMacClient == ExtWrapper, "EnsureQNCWrapper must keep known external wrapper intact!")
+    local okExt2 = pcall(_G.IsMacClient, "QNC", "")
+    assert(okExt2 and extCalls == 2, "Subsequent calls must continue cleanly through ExtWrapper! extCalls=" .. tostring(extCalls))
+    _G.IsMacClient = _oMac23
+
+    -- 7. TalorianTP MERCHANT_SHOW double-vendor guard + auctionTrade block hide
+    sc23.pepe.mask = 7; sc23.pepe.slots = 2; sc23.pepe.sel = 5; sc23.pepe.cur = 1
+    TalorianTP_DB.serverCtrl.autoPepeMerchant = true
+    _G._FireEvent("MERCHANT_SHOW")
+    local origSaved = sc23.pepe.lastMerchSwap
+    sc23.pepe.sel = 2
+    _G._FireEvent("MERCHANT_SHOW") -- back-to-back vendor without close!
+    assert(sc23.pepe.lastMerchSwap == origSaved and origSaved == 5,
+        "Back-to-back MERCHANT_SHOW must preserve initial lastMerchSwap! got=" .. tostring(sc23.pepe.lastMerchSwap))
+    _G._FireEvent("MERCHANT_CLOSED")
+    assert(sc23.pepe.lastMerchSwap == nil and sc23.pepe.sel == 5, "MERCHANT_CLOSED must restore sel=5! got=" .. tostring(sc23.pepe.sel))
+
+    TalorianTP:SetBlockEnabled("auctionTrade", false)
+    _G.AuctionFrame = _G.AuctionFrame or CreateFrame("Frame", "AuctionFrame")
+    _G.AuctionFrame:Show()
+    if TalorianTP_RefreshAuctionHelper then TalorianTP_RefreshAuctionHelper() end
+    assert((not _G.TalorianAuctionButton or not _G.TalorianAuctionButton:IsShown())
+        and (not _G.TalorianAuctionFrame or not _G.TalorianAuctionFrame:IsShown()),
+        "Disabling auctionTrade block must hide both TalorianAuctionFrame and TalorianAuctionButton!")
+    TalorianTP:SetBlockEnabled("auctionTrade", true)
+    _G.AuctionFrame:Hide()
 
     return "FULL_INTEGRATED_PASSED"
     ''')

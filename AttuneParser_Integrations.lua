@@ -2226,12 +2226,17 @@ local function HandleServerAddon(prefix, msg)
         end
     elseif prefix == "ASMSG_IB_DEL" then
         local guid = tonumber(msg:match("^(%d+)"))
-        if guid and type(SS.onIBDel) == "function" then SS.onIBDel(guid) end
+        local removedIb = false
         if guid and SS.ib.byGuid[guid] then
             SS.ib.byGuid[guid] = nil
             for i = #SS.ib.items, 1, -1 do
                 if SS.ib.items[i].guid == guid then table.remove(SS.ib.items, i) end
             end
+            removedIb = true
+        end
+        local hadWh = guid and SS.wh and SS.wh.ibg and (SS.wh.ibg[guid] ~= nil) or false
+        if guid and type(SS.onIBDel) == "function" then SS.onIBDel(guid) end
+        if removedIb or hadWh then
             AP:Fire("SERVER_SYNC_UPDATED", prefix)
             AP:Fire("ATTUNE_UPDATED", prefix)
         end
@@ -3609,10 +3614,11 @@ do
 
         local mhLink = SLOT_ID_BY_INV.MainHandSlot and type(GetInventoryItemLink) == "function"
             and GetInventoryItemLink("player", SLOT_ID_BY_INV.MainHandSlot)
-        local mh2h = false
+        local mh2h, mhSub = false, nil
         if mhLink and type(GetItemInfo) == "function" then
-            local _, _, _, _, _, _, _, _, el = GetItemInfo(mhLink)
+            local _, _, _, _, _, _, sType, _, el = GetItemInfo(mhLink)
             mh2h = (el == "INVTYPE_2HWEAPON")
+            mhSub = sType
         end
 
         local replaceableById = {}
@@ -3651,7 +3657,7 @@ do
 
         local canDW = CanPlayerDW()
         local canTG = CanPlayerTG()
-        local blockOH2H = mh2h and (not canTG)
+        local blockOH2H = mh2h and not (canTG and IsTGTwoHandSubType(mhSub))
         local firstCand, firstSlot = nil, nil
         local eligibleCands = {}
         local blockedMaskCands, busyCands = {}, {}
@@ -4171,7 +4177,7 @@ do
             local prAt = pr.at or 0
             local prIsNewest = (prAt >= putAtCheck and prAt >= splitAtCheck and prAt >= eqAtCheck)
             if (isPutAck and (not SS.ibPut or not SS.ibPut.inFlightKey or prAt >= putAtCheck))
-               or (code and code ~= 0 and text ~= "split" and text ~= "take" and prIsNewest) then
+               or (code and code ~= 0 and text ~= "split" and text ~= "splitn" and text ~= "take" and prIsNewest) then
                 SS.valdris.pendingBankReturn = nil
                 if code and code ~= 0 then
                     SS.valdris.lastError = (text and text ~= "") and text or ("Код " .. tostring(code))
@@ -4191,7 +4197,7 @@ do
             SS.onIBPutRes(code, text)
             return
         end
-        if text == "split" and type(SS.onIBSplitRes) == "function" then
+        if (text == "split" or text == "splitn") and type(SS.onIBSplitRes) == "function" then
             SS.onIBSplitRes(code, text)
             return
         end
@@ -4857,8 +4863,13 @@ do
     end
 
     function SS.onIBBagUpdate()
-        if ibPut.inFlightKey then
-            ibPut.inFlightKey = nil
+        if ibPut.inFlightKey and ibPut.inFlightBag and ibPut.inFlightSlot and type(GetContainerItemLink) == "function" then
+            local curLk = GetContainerItemLink(ibPut.inFlightBag, ibPut.inFlightSlot)
+            if not curLk then
+                ibPut.inFlightKey = nil
+                ibPut.inFlightBag = nil
+                ibPut.inFlightSlot = nil
+            end
         end
         if AP:GetSetting("ibAutoPut") == true then
             AP:ScheduleItemBankAutoPut(1.6)
@@ -5285,6 +5296,10 @@ function AP.BuildServerSyncTab(parent)
             for _, w in ipairs(rightTopWidgets) do
                 if banksOn then w:Show() else w:Hide() end
             end
+            if banksOn then
+                wbSyncBtn:ClearAllPoints()
+                wbSyncBtn:SetPoint("LEFT", ibSplitBtn, "RIGHT", 3, 0)
+            end
             if bossOn then
                 wbHdr:Show()
                 wbListBox:Show()
@@ -5557,9 +5572,10 @@ do
                 else
                     local needKeep = keep and (not isCompleted) and (forge < 3)
                     if needKeep then
-                        local cur = keepPickByEid[bKey]
+                        local keepKey = eid .. ":" .. sfx
+                        local cur = keepPickByEid[keepKey]
                         if not cur or forge > cur.forge then
-                            keepPickByEid[bKey] = { guid = guid, forge = forge, bKey = bKey }
+                            keepPickByEid[keepKey] = { guid = guid, forge = forge, bKey = bKey }
                         end
                     end
                     evalList[#evalList + 1] = {
@@ -6879,10 +6895,10 @@ do
     local function RestoreActiveEquippedItem()
         local r = vp.activeEquippedRestore
         if not r then return false end
-        vp.activeEquippedRestore = nil
         local busy = IsPlayerBusyCombatOrDead()
         if busy or (type(CursorHasItem) == "function" and CursorHasItem()) then return false end
         if type(GetInventoryItemLink) == "function" and GetInventoryItemLink("player", r.invSlot) then
+            vp.activeEquippedRestore = nil
             return false
         end
         if type(PickupContainerItem) ~= "function" or type(EquipCursorItem) ~= "function" then return false end
@@ -6905,6 +6921,7 @@ do
             end
             if bestB == r.bag and bestS == r.slot then break end
         end
+        vp.activeEquippedRestore = nil
         if bestB and bestS then
             PickupContainerItem(bestB, bestS)
             if type(CursorHasItem) ~= "function" or CursorHasItem() then
@@ -7012,7 +7029,6 @@ do
     local function ReturnActiveBankItem()
         local br = vp.activeBankReturn
         if not br then return false end
-        vp.activeBankReturn = nil
         local busy = IsPlayerBusyCombatOrDead()
         if busy or type(SS._ibSendAddon) ~= "function" then return false end
         if type(GetContainerNumSlots) ~= "function" or type(GetContainerItemLink) ~= "function" then return false end
@@ -7036,10 +7052,14 @@ do
                 if b then break end
             end
         end
-        if not b or not s then return false end
+        if not b or not s then
+            vp.activeBankReturn = nil
+            return false
+        end
         local srvBag = (b == 0) and 255 or (18 + b)
         local srvSlot = (b == 0) and (22 + s) or (s - 1)
         if SS._ibSendAddon("ACMSG_IB_PUT", srvBag .. ":" .. srvSlot) then
+            vp.activeBankReturn = nil
             vp.pendingBankReturn = { bag = b, slot = s, entry = br.entry, link = lk, at = GetTime() }
             return true
         end
@@ -7137,6 +7157,15 @@ do
             AP.forgeBag = AP.forgeBag or {}
             AP.forgeBag[pr.rBag] = AP.forgeBag[pr.rBag] or {}
             AP.forgeBag[pr.rBag][pr.rSlot] = pr.to
+            if vp.activeEquippedRestore and vp.activeEquippedRestore.entry == pr.entry then
+                vp.activeEquippedRestore.bag = pr.rBag
+                vp.activeEquippedRestore.slot = pr.rSlot
+            end
+            if vp.activeBankReturn and vp.activeBankReturn.entry == pr.entry then
+                vp.activeBankReturn.bag = pr.rBag
+                vp.activeBankReturn.slot = pr.rSlot
+                vp.activeBankReturn.link = lkR
+            end
             vp.pendingRelocate = nil
             return true
         end
@@ -7552,7 +7581,7 @@ do
             end
             if type(preSlot) == "string" and preSlot:find(":", 1, true) then
                 local pb, ps = strsplit(":", preSlot)
-                pb, ps = tonumber(pb), tonumber(ps)
+                pb, ps = NormalizeIProgBagSlot(pb, ps)
                 if pb and ps then
                     local lk = (type(GetContainerItemLink) == "function") and GetContainerItemLink(pb, ps)
                     if lk then RecordSelectedVisual(pb, ps, lk) end
@@ -7671,7 +7700,27 @@ do
             entry = tonumber(entry) or 0
             from, to = tonumber(from) or 0, tonumber(to) or 0
             local d = vp.inFlightDo
-            if not d then return end
+            if not d then
+                if st == 0 then
+                    local rBag, rSlot = NormalizeIProgBagSlot(bag, slot)
+                    if vp.passiveInfo and rBag and rSlot then
+                        vp.passiveInfo[rBag .. ":" .. rSlot] = nil
+                    end
+                    local newLk = (rBag and rSlot and type(GetContainerItemLink) == "function") and GetContainerItemLink(rBag, rSlot) or nil
+                    if rBag and rSlot and newLk and (entry == 0 or not AP.ExtractItemId or AP.ExtractItemId(newLk) == entry) then
+                        AP.forgeBag = AP.forgeBag or {}
+                        AP.forgeBag[rBag] = AP.forgeBag[rBag] or {}
+                        AP.forgeBag[rBag][rSlot] = to
+                    end
+                    if entry > 0 then
+                        if AP.InvalidateItemStatus then AP:InvalidateItemStatus(entry) end
+                        if AP.InvalidateZoneCache then AP:InvalidateZoneCache(nil) end
+                    end
+                    RefreshValdrisBar()
+                    if vpPicker and vpPicker:IsShown() and RefreshValdrisPicker then RefreshValdrisPicker() end
+                end
+                return
+            end
             vp.inFlightDo = nil
             if st == 0 then
                 vp.doneCount = (vp.doneCount or 0) + 1
@@ -7778,6 +7827,14 @@ do
     local function EnsureValdrisSortMenu(ownerParent)
         if vpSortMenu then return vpSortMenu end
         local menuHost = rawget(_G, "ItemProgressFrame") or rawget(_G, "UIParent") or ownerParent
+        local dismissHost = rawget(_G, "UIParent") or menuHost
+        local bgDismiss = CreateFrame("Button", "AP_ValdrisSortDismiss", dismissHost)
+        bgDismiss:SetAllPoints(dismissHost)
+        bgDismiss:SetFrameStrata("FULLSCREEN_DIALOG")
+        bgDismiss:SetFrameLevel(18)
+        bgDismiss:EnableMouse(true)
+        bgDismiss:Hide()
+
         local m = CreateFrame("Frame", "AP_ValdrisSortMenu", menuHost)
         local rowH = 22
         m:SetSize(272, #VALDRIS_SORT_MODES * rowH + 30)
@@ -7787,6 +7844,8 @@ do
         m:SetClampedToScreen(true)
         m:Hide()
         PS.StyleBox(m, 0.97, true)
+        bgDismiss:SetScript("OnClick", function() m:Hide() end)
+        m.dismissOverlay = bgDismiss
 
         local hdr = m:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
         hdr:SetPoint("TOPLEFT", 8, -7)
@@ -7828,7 +7887,11 @@ do
             rb:SetScript("OnLeave", function() GameTooltip:Hide() end)
             m.rows[#m.rows + 1] = rb
         end
+        m:SetScript("OnShow", function()
+            if bgDismiss then bgDismiss:Show() end
+        end)
         m:SetScript("OnHide", function()
+            if bgDismiss then bgDismiss:Hide() end
             if GameTooltip and GameTooltip.Hide then GameTooltip:Hide() end
         end)
 
@@ -7847,6 +7910,10 @@ do
         RefreshValdrisSortMenu()
         m:SetFrameStrata("FULLSCREEN_DIALOG")
         m:SetFrameLevel(20)
+        if m.dismissOverlay then
+            m.dismissOverlay:SetFrameStrata("FULLSCREEN_DIALOG")
+            m.dismissOverlay:SetFrameLevel(18)
+        end
         if m.closeBtn then
             m.closeBtn:SetFrameStrata("FULLSCREEN_DIALOG")
             m.closeBtn:SetFrameLevel(25)
@@ -8231,6 +8298,7 @@ do
         end
         EnsureValdrisPicker(ipf, pickBtn)
         pickBtn:SetScript("OnClick", function(_, mBtn)
+            if vpSortMenu then vpSortMenu:Hide() end
             if mBtn == "RightButton" then
                 vp.lastPicked = nil
                 RefreshValdrisBar()
@@ -8260,6 +8328,7 @@ do
         goBtn:SetPoint("LEFT", pickBtn, "RIGHT", 3, 0)
         goBtn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
         goBtn:SetScript("OnClick", function(_, mBtn)
+            if vpSortMenu then vpSortMenu:Hide() end
             if vp.running then
                 AP:StopValdrisAutoUpgrade("user")
             elseif mBtn == "RightButton" then
@@ -8296,7 +8365,10 @@ do
 
         local tierBtn = PS.MakeBtn(f, 102, 20, "Цель: Титан (3)", "dark")
         tierBtn:SetPoint("LEFT", goBtn, "RIGHT", 3, 0)
-        tierBtn:SetScript("OnClick", function() AP:CycleValdrisMaxTier() end)
+        tierBtn:SetScript("OnClick", function()
+            if vpSortMenu then vpSortMenu:Hide() end
+            AP:CycleValdrisMaxTier()
+        end)
         tierBtn:SetScript("OnEnter", function(self)
             GameTooltip:SetOwner(self, "ANCHOR_TOP")
             GameTooltip:SetText("Потолок автоулучшения")
@@ -8475,6 +8547,14 @@ do
             end
             if anySlot then vp.slotHookDone = true end
         end
+        if not vp.tabHookDone and type(_G.ItemProgress_SetTab) == "function" then
+            vp.tabHookDone = true
+            hooksecurefunc("ItemProgress_SetTab", function()
+                if vpSortMenu then vpSortMenu:Hide() end
+                RefreshValdrisBar()
+                if vpPicker and vpPicker:IsShown() and RefreshValdrisPicker then RefreshValdrisPicker() end
+            end)
+        end
     end
 
     function SS.tryHookValdris()
@@ -8504,7 +8584,6 @@ do
                     vp.barWarmCount = 0
                     vp.barWarmScheduled = false
                     vp.lastError = nil
-                    vp.lastPicked = nil
                     vp.pendingUnequip = nil
                     vp.pendingBankTake = nil
                     local now = GetTime()
@@ -8517,12 +8596,25 @@ do
                 end)
                 ipf:HookScript("OnHide", function()
                     vp.pauseEquipUntil = 0
+                    vp.lastPicked = nil
                     vp.pendingUnequip = nil
                     vp.pendingBankTake = nil
                     if vpPicker then vpPicker:Hide() end
+                    if vpSortMenu then vpSortMenu:Hide() end
                     AP:StopValdrisAutoUpgrade("closed")
                     RefreshValdrisBar()
                 end)
+            end
+            local dispInset = ipf.DispLeftInset
+            if dispInset and type(dispInset.HookScript) == "function" and not vp.dispHooked then
+                vp.dispHooked = true
+                local function OnValdrisSubTab()
+                    if vpSortMenu then vpSortMenu:Hide() end
+                    RefreshValdrisBar()
+                    if vpPicker and vpPicker:IsShown() and RefreshValdrisPicker then RefreshValdrisPicker() end
+                end
+                dispInset:HookScript("OnShow", OnValdrisSubTab)
+                dispInset:HookScript("OnHide", OnValdrisSubTab)
             end
         end
         RefreshValdrisBar()
@@ -9673,6 +9765,8 @@ do
 
         local warmRetry = {}
         local warmPassChanged = false
+        local warmPass = 0
+        local MAX_WARM_PASSES = 3
         warmDrv:SetScript("OnUpdate", function(self, elapsed)
             if not warmRunning then self:Hide(); return end
             warmAcc = warmAcc + (elapsed or 0)
@@ -9682,7 +9776,8 @@ do
                 or (type(UnitAffectingCombat) == "function" and UnitAffectingCombat("player"))
             if inC then return end
             local nextEid = table.remove(warmQueue, 1)
-            if not nextEid and #warmRetry > 0 then
+            if not nextEid and #warmRetry > 0 and warmPass < MAX_WARM_PASSES then
+                warmPass = warmPass + 1
                 warmQueue = warmRetry
                 warmRetry = {}
                 nextEid = table.remove(warmQueue, 1)
@@ -9690,6 +9785,7 @@ do
             end
             if not nextEid then
                 warmRunning = false
+                warmRetry = {}
                 self:Hide()
                 if warmPassChanged and type(AP.InvalidateCaches) == "function" then
                     warmPassChanged = false
@@ -9706,7 +9802,9 @@ do
                 if type(SS._ibWarmCache) == "function" then
                     SS._ibWarmCache("item:" .. nextEid)
                 end
-                warmRetry[#warmRetry + 1] = nextEid
+                if warmPass < MAX_WARM_PASSES then
+                    warmRetry[#warmRetry + 1] = nextEid
+                end
             end
             if (#warmQueue % 10) == 0 then
                 if warmPassChanged and type(AP.InvalidateCaches) == "function" then
@@ -9721,6 +9819,7 @@ do
             local res = AP:GetMorKelSetsProgress(opts)
             warmQueue = {}
             warmRetry = {}
+            warmPass = 0
             warmPassChanged = false
             local seen = {}
             for _, g in ipairs(res.groups or {}) do

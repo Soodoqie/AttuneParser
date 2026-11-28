@@ -9,7 +9,7 @@
 local AP = _G.AttuneParser or {}
 _G.AttuneParser = AP
 
-AP.VERSION = "1.3.3"
+AP.VERSION = "1.3.4"
 AP.Data = AP.Data or {}
 
 -- User-confirmed server tier defaults (replaced live when ASMSG_ATTUNE_TIERS arrives)
@@ -286,10 +286,12 @@ do
         statusCache = {}
         noReqCache = nil
         if not zoneOnly then
-            itemMetaCache = {}
+            for k in pairs(itemMetaCache) do itemMetaCache[k] = nil end
+            AP._mem.itemMetaCache = itemMetaCache
             absorbCache = {}
             heavyQuestCache = {}
-            sourceCache = {}
+            for k in pairs(sourceCache) do sourceCache[k] = nil end
+            AP._mem.sourceCache = sourceCache
         end
     end
 
@@ -1266,8 +1268,8 @@ do
             if sv.rand then rec.hasRandomSuffix = true end
             if sv.noAtt then rec.noAttune = true end
             if sv.resOnly then rec.resOnly = true end
-            if sv.allowCls ~= nil then rec.allowCls = sv.allowCls end
-            if sv.clsMask ~= nil then rec.allowCls = sv.clsMask end
+            if sv.allowCls and sv.allowCls > 0 then rec.allowCls = sv.allowCls end
+            if sv.clsMask and sv.clsMask > 0 then rec.allowCls = sv.clsMask end
             if sv.stats then
                 local stTbl, cSum = {}, 0
                 for sid, val in pairs(sv.stats) do
@@ -1409,13 +1411,14 @@ do
             sfx = sfxOrLink
         end
 
-        if sfx ~= 0 and fullLink then
+        if sfx ~= 0 then
             AttuneParserDB = AttuneParserDB or {}
             AttuneParserDB.seenSuffixes = AttuneParserDB.seenSuffixes or {}
             AttuneParserDB.seenSuffixes[eid] = AttuneParserDB.seenSuffixes[eid] or {}
             local cachedSuf = AttuneParserDB.seenSuffixes[eid][sfx]
             if not cachedSuf then
-                local ext = AP.ExtractLiveStatsAndMeta(eid, fullLink)
+                local sLink = fullLink or ("item:" .. eid .. ":0:0:0:0:0:" .. sfx .. ":0")
+                local ext = AP.ExtractLiveStatsAndMeta(eid, sLink)
                 if ext then
                     cachedSuf = {
                         name = ext.name,
@@ -1475,7 +1478,7 @@ do
         if usable then
             local _, playerClass = UnitClass("player")
             -- Call server CustomAttuneItemStatus only when link given or offline class/item metadata is missing
-            if (link or (not rec.statsKnown and rec.allowCls == -1)) and type(_G.CustomAttuneItemStatus) == "function" then
+            if (link or (rec.allowCls == -1 and (not rec.statsKnown or (rec.cls == 0 and rec.inv == 0)))) and type(_G.CustomAttuneItemStatus) == "function" then
                 local sfx = link and AP.ExtractSuffix(link) or 0
                 local oks, _, cant, _, attun = pcall(_G.CustomAttuneItemStatus, eid, 0, sfx)
                 if oks and attun == false then
@@ -2065,6 +2068,13 @@ do
             dMask = InferRuntimeDiffMask(topId, eid, rec and rec.ilvl or 0, zMeta.isRaid, zMeta.exp)
         end
         if dMask <= 0 then return "" end
+
+        if maxDiffs == 2 and dMask >= 4 then
+            local clamped = 0
+            if (dMask % 2) >= 1 or (dMask % 8) >= 4 then clamped = clamped + 1 end
+            if (dMask % 4) >= 2 or (dMask % 16) >= 8 then clamped = clamped + 2 end
+            dMask = clamped
+        end
 
         local tbl
         if maxDiffs == 4 then
@@ -2911,7 +2921,7 @@ do
                                 info.lotTierName = info.isNew and AP.TIER_NAMES[0] or "Нужна ковка"
                                 info.needsForgeCheck = not info.isNew
                                 info.gainNowPct = info.isNew and (info.newBasePct or lotPct) or 0
-                                info.gainNowStats = info.isNew and (info.newImmediateStats or 0) or 0
+                                info.gainNowStats = info.isNew and (info.immediateNewStats or 0) or 0
                                 info.primeRow = ib.row
                                 info.primeLot = d
                                 table.insert(out, info)
@@ -2947,7 +2957,7 @@ do
                                     info.lotTierName = info.isNew and "Новый (+20%)" or ("Ковка (" .. (info.doneTierName or "") .. ")")
                                     info.needsForgeCheck = not info.isNew
                                     info.gainNowPct = info.isNew and (info.newBasePct or 20) or 0
-                                    info.gainNowStats = info.isNew and (info.newImmediateStats or 0) or 0
+                                    info.gainNowStats = info.isNew and (info.immediateNewStats or 0) or 0
                                     table.insert(out, info)
                                 end
                             end
@@ -3000,7 +3010,7 @@ do
                             info.lotTierName = info.isNew and (AP.TIER_NAMES[0] or "Обычный") or "Нужна ковка"
                             info.needsForgeCheck = not info.isNew
                             info.gainNowPct = info.isNew and (info.newBasePct or AP.TIER_PCT[0] or 20) or 0
-                            info.gainNowStats = info.isNew and (info.newImmediateStats or 0) or 0
+                            info.gainNowStats = info.isNew and (info.immediateNewStats or 0) or 0
                             table.insert(out, info)
                         end
                     end
@@ -3270,7 +3280,7 @@ do
                 end
             end
         elseif needTip and (InCombatLockdown and InCombatLockdown()) then
-            return AP.guildAttuneBonusPct or bestAttune, giftCache.guildExpPct or bestExp, false
+            return math.max(AP.guildAttuneBonusPct or 0, bestAttune), math.max(giftCache.guildExpPct or 0, bestExp), false
         end
         giftCache.guildBonusKey = cacheKey
         giftCache.guildBonusPct = bestAttune
@@ -3282,9 +3292,13 @@ do
     end
 
     local function ResolveGuildAttuneBonus()
+        if type(IsInGuild) == "function" and not IsInGuild() then
+            return 0, true
+        end
         local gAtt, _, gKnown = ScanGuildPerkBonuses()
         if AP.mentorWhere and AP.mentorWhere.v2 then
-            return AP.guildAttuneBonusPct or gAtt or 0, true
+            local mwPct = AP.guildAttuneBonusPct or 0
+            return (mwPct > 0 and mwPct or gAtt or 0), true
         end
         return gAtt, gKnown
     end
@@ -4228,8 +4242,10 @@ do
             if not rawZid then return end
             local topMap = AP.Data and AP.Data.TopMap or {}
             local topId = topMap[rawZid] or rawZid
-            if clear == "1" or not AP.serverZoneItems[topId] then
-                AP.serverZoneItems[topId] = AP.serverZoneItems[topId] or {}
+            if clear == "1" then
+                AP.serverZoneItems[topId] = {}
+            elseif not AP.serverZoneItems[topId] then
+                AP.serverZoneItems[topId] = {}
             end
             local bucket = AP.serverZoneItems[topId]
             if payload and payload ~= "" then
@@ -4463,7 +4479,7 @@ do
             AP.autoSwap.blacklist = {}
             AP.autoSwap.blacklistByEntry = {}
             for tok in msg:gmatch("[^,]+") do
-                local _e, _t = tok:match("(%d+):(%d+)")
+                local _e, _t = tok:match("(%d+):(%-?%d+)")
                 local eid = tonumber(_e)
                 local tier = tonumber(_t) or 0
                 if eid then
@@ -4640,7 +4656,8 @@ do
                 AP.questCompleted = {}
                 pcall(GetQuestsCompleted, AP.questCompleted)
             end
-            AP._mem.sourceCache = {}
+            for k in pairs(sourceCache) do sourceCache[k] = nil end
+            AP._mem.sourceCache = sourceCache
             AP:InvalidateZoneCache(nil)
             AP:Fire("ATTUNE_UPDATED", "QUEST_QUERY_COMPLETE")
         elseif event == "UNIT_AURA" and a1 == "player" then
