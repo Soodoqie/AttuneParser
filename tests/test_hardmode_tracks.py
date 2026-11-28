@@ -209,8 +209,8 @@ function CreateFrame(ftype, name, parent, template)
     function f:GetHeight() return self._h or 600 end
     function f:SetFrameStrata(s) self._strata = s end
     function f:GetFrameStrata() return self._strata or "MEDIUM" end
-    function f:SetFrameLevel() end
-    function f:GetFrameLevel() return 1 end
+    function f:SetFrameLevel(l) self._frameLevel = tonumber(l) or 1 end
+    function f:GetFrameLevel() return self._frameLevel or 1 end
     function f:SetToplevel() end
     function f:EnableMouse() end
     function f:EnableMouseWheel() end
@@ -2454,6 +2454,10 @@ SUITE_21DE_LUA = r'''
     vb21i.sortBtn._scripts.OnClick(vb21i.sortBtn, "LeftButton")
     local sm21i = _G.AP_ValdrisSortMenu
     assert(sm21i and sm21i:IsShown() and sm21i.rows and sm21i.rows[2], "21i LKM on sortBtn must open AP_ValdrisSortMenu!")
+    assert(sm21i:GetFrameStrata() == "FULLSCREEN_DIALOG" and sm21i:GetFrameLevel() < 100
+        and sm21i.rows[1]:GetFrameLevel() > sm21i:GetFrameLevel()
+        and sm21i.closeBtn and sm21i.closeBtn:GetFrameLevel() > sm21i:GetFrameLevel(),
+        "21i AP_ValdrisSortMenu buttons and closeBtn must sit at higher FrameLevel than menu backdrop and < 100!")
     sm21i.rows[2]._scripts.OnClick(sm21i.rows[2], "LeftButton")
     assert(not sm21i:IsShown() and AP:GetValdrisSort() == "worst", "21i Selecting menu row 2 must activate 'worst' sort and close menu!")
     assert(pf21i.rows[1].itemData and pf21i.rows[1].itemData.eid == 99501,

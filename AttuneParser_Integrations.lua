@@ -7782,7 +7782,7 @@ do
         local rowH = 22
         m:SetSize(272, #VALDRIS_SORT_MODES * rowH + 30)
         m:SetFrameStrata("FULLSCREEN_DIALOG")
-        m:SetFrameLevel(150)
+        m:SetFrameLevel(20)
         m:EnableMouse(true)
         m:SetClampedToScreen(true)
         m:Hide()
@@ -7795,11 +7795,16 @@ do
         local xBtn = CreateFrame("Button", nil, m)
         xBtn:SetPoint("TOPRIGHT", -5, -5)
         PS.StyleClose(xBtn, 16)
+        xBtn:SetFrameStrata("FULLSCREEN_DIALOG")
+        xBtn:SetFrameLevel(25)
         xBtn:SetScript("OnClick", function() m:Hide() end)
+        m.closeBtn = xBtn
 
         m.rows = {}
         for i, sm in ipairs(VALDRIS_SORT_MODES) do
             local rb = PS.MakeBtn(m, 256, 20, sm.menuLabel, "dark")
+            rb:SetFrameStrata("FULLSCREEN_DIALOG")
+            rb:SetFrameLevel(25)
             rb:SetPoint("TOPLEFT", m, "TOPLEFT", 8, -(24 + (i - 1) * rowH))
             if rb.label then
                 rb.label:ClearAllPoints()
@@ -7840,6 +7845,16 @@ do
             return
         end
         RefreshValdrisSortMenu()
+        m:SetFrameStrata("FULLSCREEN_DIALOG")
+        m:SetFrameLevel(20)
+        if m.closeBtn then
+            m.closeBtn:SetFrameStrata("FULLSCREEN_DIALOG")
+            m.closeBtn:SetFrameLevel(25)
+        end
+        for _, rb in ipairs(m.rows or {}) do
+            rb:SetFrameStrata("FULLSCREEN_DIALOG")
+            rb:SetFrameLevel(25)
+        end
         m.anchorBtn = anchorBtn
         m:ClearAllPoints()
         m:SetPoint("TOPLEFT", anchorBtn, "BOTTOMLEFT", 0, -3)
